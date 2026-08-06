@@ -1,0 +1,64 @@
+{
+  "model_performance": {
+    "accuracy": 0.9075,
+    "auc": 0.98125
+  },
+  "shap_skill_vs_pedigree": {
+    "skill_reliance_pct": 56.8,
+    "pedigree_reliance_pct": 43.2,
+    "feature_importances": [
+      {
+        "feature": "college_tier",
+        "mean_abs_shap": 3.1117658615112305
+      },
+      {
+        "feature": "experience_years",
+        "mean_abs_shap": 2.9800853729248047
+      },
+      {
+        "feature": "screening_score",
+        "mean_abs_shap": 1.623608112335205
+      },
+      {
+        "feature": "career_gap_months",
+        "mean_abs_shap": 0.3604625463485718
+      },
+      {
+        "feature": "is_metro",
+        "mean_abs_shap": 0.02681964822113514
+      }
+    ]
+  },
+  "single_candidate_demo": {
+    "screening_score": 88.02,
+    "college_tier_before": 3,
+    "college_tier_after": 1,
+    "score_before_pct": 0.3,
+    "score_after_pct": 47.3,
+    "delta_pts": 47.0
+  },
+  "aggregate_perturbation_test": {
+    "field_tested": "college_tier",
+    "n_candidates": 127,
+    "avg_delta_pts": 62.81,
+    "median_delta_pts": 82.56,
+    "std_dev": 39.24,
+    "min_delta_pts": 0.43,
+    "max_delta_pts": 99.61,
+    "wilcoxon_p_value": 1.39e-22,
+    "significant": true
+  },
+  "reference_control_field": {
+    "field_tested": "career_gap_months",
+    "avg_delta_pts": 2.09
+  },
+  "feature_cols": [
+    "screening_score",
+    "college_tier",
+    "is_metro",
+    "career_gap_months",
+    "experience_years"
+  ],
+  "skill_col": "screening_score",
+  "outcome_col": "shortlisted_v2"
+}

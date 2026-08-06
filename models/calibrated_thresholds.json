@@ -1,0 +1,14 @@
+{
+  "p_value_cutoff": 0.05,
+  "noise_baseline": {
+    "overall_mean": 2.5,
+    "overall_p95": 6.0
+  },
+  "known_real_bias_effect": 33.0,
+  "safety_margin": 1.75,
+  "low_ceiling": 4.38,
+  "high_threshold": 23.1,
+  "med_lower": 4.38,
+  "med_upper": 23.1,
+  "methodology_note": "Initial artifact aligned with Section 5.8. Re-run scripts/calibrate_thresholds.py against your candidate CSV to replace these values with empirically measured anchors."
+}
