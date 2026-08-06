@@ -1,0 +1,6 @@
+candidate_id,screening_score,college_tier,is_metro,career_gap_months,experience_years,shortlisted
+C00001,88,3,0,2,4,1
+C00002,72,2,1,0,3,1
+C00003,,3,0,6,2,0
+C00004,91,1,1,0,6,1
+C00005,58,3,0,12,1,0
