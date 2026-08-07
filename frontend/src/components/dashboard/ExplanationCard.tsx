@@ -1,0 +1,79 @@
+import React from 'react';
+import { Card } from '../ui/Card';
+import { Badge } from '../ui/Badge';
+import { Sparkles, FileText, CheckCircle2 } from 'lucide-react';
+
+export interface ExplanationCardProps {
+  explanationText?: string | null;
+  isLoading?: boolean;
+  className?: string;
+}
+
+export const ExplanationCard: React.FC<ExplanationCardProps> = ({
+  explanationText,
+  isLoading = false,
+  className = '',
+}) => {
+  if (isLoading) {
+    return (
+      <Card className={`p-6 bg-white border border-slate-200/90 shadow-md ${className}`}>
+        <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+          <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-200 text-blue-600 flex items-center justify-center shrink-0">
+            <Sparkles className="w-4 h-4 animate-spin" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">Generating Audit Findings Narrative</h3>
+            <p className="text-xs text-slate-500">Synthesizing statistical evidence & SHAP attribution...</p>
+          </div>
+        </div>
+        <div className="mt-4 space-y-2">
+          <div className="h-4 bg-slate-100 rounded w-full animate-pulse" />
+          <div className="h-4 bg-slate-100 rounded w-5/6 animate-pulse" />
+          <div className="h-4 bg-slate-100 rounded w-4/6 animate-pulse" />
+        </div>
+      </Card>
+    );
+  }
+
+  if (!explanationText) {
+    return null;
+  }
+
+  return (
+    <Card className={`p-6 bg-slate-900 text-slate-100 border border-slate-800 shadow-xl relative overflow-hidden ${className}`}>
+      <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
+
+      <div className="relative z-10 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-blue-600/20 border border-blue-500/30 text-blue-400 flex items-center justify-center shrink-0 shadow-inner">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-white">
+                  Audit Findings Summary & Narrative
+                </h3>
+                <Badge variant="primary" size="sm">
+                  Executive Narrative
+                </Badge>
+              </div>
+              <p className="text-xs text-slate-400">
+                Automated synthesized explanation derived from model SHAP attribution and counterfactual perturbations
+              </p>
+            </div>
+          </div>
+
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-mono-tabular text-slate-400 bg-slate-800/80 px-2.5 py-1 rounded-md border border-slate-700">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+            Verified Findings
+          </span>
+        </div>
+
+        <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800/80 font-mono-tabular text-xs sm:text-sm text-slate-200 leading-relaxed whitespace-pre-wrap select-text">
+          {explanationText}
+        </div>
+      </div>
+    </Card>
+  );
+};
