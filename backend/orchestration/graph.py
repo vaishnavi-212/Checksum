@@ -127,6 +127,40 @@ def _scores_from_uploaded_decisions(records: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Display-feature enrichment (frontend convenience only — never used in
+# scoring logic; attached purely so the Results Dashboard candidate table
+# can show input feature values alongside model output without a separate
+# lookup)
+# ---------------------------------------------------------------------------
+
+_DISPLAY_FEATURE_KEYS = (
+    "screening_score",
+    "college_tier",
+    "is_metro",
+    "experience_years",
+    "career_gap_months",
+)
+
+
+def _attach_display_features(scores: list[dict], records: list[dict]) -> list[dict]:
+    """
+    Attach raw input feature values (display-only, never used in scoring
+    logic) to each score dict, keyed by candidate_id, so the frontend can
+    show them alongside the model's output without re-deriving anything.
+    Never overwrites existing ScoreResult keys.
+    """
+    records_by_id = {str(r.get("candidate_id", "")): r for r in records}
+    for score in scores:
+        record = records_by_id.get(score.get("candidate_id"))
+        if record is None:
+            continue
+        score["input_features"] = {
+            key: record[key] for key in _DISPLAY_FEATURE_KEYS if key in record
+        }
+    return scores
+
+
+# ---------------------------------------------------------------------------
 # Node implementations
 # ---------------------------------------------------------------------------
 
@@ -191,6 +225,11 @@ def node_score(state: CheckSumState) -> dict:
     All three converge on the same output shape: a list of
     {candidate_id, score, decision, feature_importances} dicts satisfying
     the Model Interface contract (Section 5.4).
+
+    Each returned score dict also carries a display-only "input_features"
+    key (see _attach_display_features above) — raw input values for the
+    Results Dashboard candidate table. This is purely additive and never
+    read by any scoring/audit/mitigation logic downstream.
     """
     if state.get("error"):
         return {}
@@ -279,7 +318,11 @@ def node_score(state: CheckSumState) -> dict:
 
     if path == "2b":
         # Path 2b: decisions-only — use uploaded outcomes, do not re-score.
-        return {"scores": _scores_from_uploaded_decisions(records)}
+        return {
+            "scores": _attach_display_features(
+                _scores_from_uploaded_decisions(records), records
+            )
+        }
 
     # Every model (own or external) is scored against Candidate objects, per
     # the ScoringModel contract (interface/model_interface.py); the pipeline
@@ -293,14 +336,20 @@ def node_score(state: CheckSumState) -> dict:
 
         adapter = ExternalModelAdapter(state["external_model_endpoint"])
         score_results = adapter.score_batch(candidates)
-        return {"scores": [asdict(sr) for sr in score_results] + excluded_scores}
+        return {
+            "scores": _attach_display_features(
+                [asdict(sr) for sr in score_results] + excluded_scores, records
+            )
+        }
 
     # Default / Path 1: score with Checksum's own Hiring Agent.
     from core.model_registry import get_hiring_agent
 
     agent = get_hiring_agent()
     score_results = agent.score_batch(candidates) if candidates else []
-    scores = [asdict(sr) for sr in score_results] + excluded_scores
+    scores = _attach_display_features(
+        [asdict(sr) for sr in score_results] + excluded_scores, records
+    )
     updates: dict = {"scores": scores}
     if excluded_scores:
         updates["warnings"] = state.get("warnings", []) + [
