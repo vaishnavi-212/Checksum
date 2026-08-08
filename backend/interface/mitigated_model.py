@@ -52,7 +52,19 @@ class GroupAdjustedModel(ScoringModel):
 
     @property
     def supports_native_explainability(self) -> bool:
-        return self._inner.supports_native_explainability
+        # Deliberately always False, even though the wrapped inner model
+        # (e.g. HiringAgent) supports native TreeExplainer: after wrapping,
+        # score() includes a post-hoc per-group additive adjustment that is
+        # NOT part of the underlying tree structure. TreeExplainer only
+        # ever sees the raw tree (via __getattr__'s "_model" passthrough
+        # below), so it would silently ignore the mitigation adjustment
+        # entirely — producing a "before vs after" SHAP comparison that
+        # never actually reflects the mitigation, no matter how much the
+        # scores themselves changed. Forcing the KernelSHAP (black-box)
+        # path instead ensures the comparison calls THIS wrapper's own
+        # .score() for every sample, so the adjustment is correctly
+        # measured rather than silently bypassed.
+        return False
 
     @property
     def model_source(self) -> str:
@@ -72,6 +84,10 @@ class GroupAdjustedModel(ScoringModel):
 
     def __getattr__(self, name: str):
         # Allow SHAP TreeExplainer to reach the underlying estimator.
+        # No longer reached by skill_vs_pedigree_split for THIS wrapper
+        # (supports_native_explainability is forced False above), but left
+        # in place in case anything else legitimately needs the raw
+        # estimator (e.g. debugging, future callers).
         if name == "_model":
             return getattr(self._inner, "_model", None)
         raise AttributeError(name)

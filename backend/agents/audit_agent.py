@@ -191,15 +191,38 @@ class AuditAgent:
     ) -> dict:
         """
         Native TreeExplainer when the model exposes an underlying estimator;
-        otherwise KernelSHAP approximation for external/query-only models.
+        otherwise KernelSHAP approximation for external/query-only models —
+        and ALSO for any wrapped model (e.g. GroupAdjustedModel, applied by
+        Fix/Mitigation) whose actual score() output differs from its inner
+        raw estimator's raw prediction.
+
+        This distinction matters: TreeExplainer explains the raw tree
+        ensemble structurally (it walks the tree splits directly). It has
+        no way to see a post-hoc additive adjustment glued on top of that
+        ensemble's output by a wrapper - so running it on a wrapped model
+        would silently reach past the wrapper (via GroupAdjustedModel's
+        __getattr__, which forwards `_model` straight to the inner raw
+        model) and compute SHAP on the completely untouched original
+        model. That made a "before" vs "after mitigation" comparison
+        always report identical numbers, regardless of what the
+        mitigation actually changed - not because the mitigation had no
+        effect (Perturb/score results already prove it does), but because
+        this metric specifically wasn't looking at the mitigated model at
+        all. KernelSHAP instead treats model.score() as a black box, so it
+        correctly reflects whatever a wrapper adds on top.
         """
         import shap
         import pandas as pd
+        from interface.mitigated_model import GroupAdjustedModel
 
         if not feature_cols:
             return {"method": "unavailable", "note": "No feature columns declared."}
 
-        if self.model.supports_native_explainability:
+        use_native = self.model.supports_native_explainability and not isinstance(
+            self.model, GroupAdjustedModel
+        )
+
+        if use_native:
             underlying = getattr(self.model, "_model", None)
             if underlying is None:
                 return {"method": "unavailable", "note": "No underlying estimator exposed for SHAP."}
