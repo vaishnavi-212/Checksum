@@ -455,26 +455,45 @@ def node_explain(state: CheckSumState) -> dict:
 
 
 def _template_fallback_explanation(state: CheckSumState) -> str:
+    """
+    Plain-language summary shown when the LLM explanation path is
+    unavailable/disabled (CHECKSUM_LLM_ENABLED=false, or the LLM call
+    failed). Deliberately avoids technical jargon (SHAP, pedigree/proxy,
+    Wilcoxon, etc.) in favor of wording a non-technical hiring manager or
+    candidate could understand at a glance - the numbers themselves are
+    unchanged, only how they're described in this summary sentence.
+    """
     mode = state.get("audit_mode", "statistical_only")
     if mode == "perturbation":
         shap = state.get("shap_summary", {})
         pedigree_pct = shap.get("pedigree_reliance_pct")
+        skill_pct = shap.get("skill_reliance_pct")
+
         if pedigree_pct is not None and pedigree_pct >= 30:
             return (
-                f"This model relies on pedigree/proxy signals for approximately "
-                f"{pedigree_pct:.0f}% of its decisions, which exceeds Checksum's "
-                f"calibrated threshold for a confirmed bias flag. Field-level "
-                f"perturbation results are attached."
+                f"About {pedigree_pct:.0f}% of this model's decisions come from "
+                f"background factors - like college tier, location, or career "
+                f"gaps - rather than directly from skills or experience. "
+                f"That's higher than what Checksum considers acceptable, so "
+                f"this model has been flagged for possible bias. See the "
+                f"breakdown below for exactly which factors are driving this."
             )
+
+        skill_text = f"about {skill_pct:.0f}%" if skill_pct is not None else "most"
         return (
-            "This model's decisions are primarily driven by skill-related "
-            "features, with pedigree/proxy fields contributing minimally. "
-            "See the attached per-field breakdown for details."
+            f"This model bases its decisions mainly on job-relevant factors "
+            f"like skills and experience ({skill_text} of its reasoning), "
+            f"with only a small role for background factors like college "
+            f"tier or location. No bias was flagged. See the breakdown "
+            f"below for the full picture."
         )
+
     return (
-        "Statistical group-comparison audit completed (no live model access "
-        "was available for this job). See the four-fifths rule and "
-        "matched-pair results attached for details."
+        "This audit compared selection rates across different candidate "
+        "groups using only the outcomes that were uploaded - no scoring "
+        "model was available for this job. See the results below to see "
+        "how each group's selection rate compares, and whether any group "
+        "was selected noticeably less often than others."
     )
 
 
