@@ -12,6 +12,7 @@ import {
   BarChart3,
   HelpCircle,
   CheckCircle2,
+  ChevronDown,
 } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
@@ -33,6 +34,67 @@ export interface LandingUploadScreenProps {
 
 type AuditPathType = '1' | '2a' | '2b';
 
+interface DemoDataset {
+  id: string;
+  name: string;
+  caption: string;
+  filename: string;
+  recordCount: number;
+  csvContent: string;
+}
+
+const DEMO_DATASETS: DemoDataset[] = [
+  {
+    id: 'complete',
+    name: 'Complete Dataset (10 candidates)',
+    caption: 'Fully valid data, ideal for Path 1 or 2A full scoring + SHAP analysis',
+    filename: 'checksum_complete_dataset_10.csv',
+    recordCount: 10,
+    csvContent: `candidate_id,gender,age,screening_score,college_tier,is_metro,career_gap_months,experience_years,shortlisted
+C00001,Male,29,88,3,0,2,4,1
+C00002,Female,26,72,2,1,0,3,1
+C00003,Male,24,65,3,0,6,2,0
+C00004,Female,31,91,1,1,0,6,1
+C00005,Male,35,58,3,0,12,1,0
+C00006,Female,28,79,2,1,1,5,1
+C00007,Male,33,83,1,1,0,7,1
+C00008,Female,23,61,3,0,8,2,0
+C00009,Male,27,75,2,0,3,4,1
+C00010,Female,30,69,2,1,4,3,0`,
+  },
+  {
+    id: 'missing_field',
+    name: 'Missing Field Demo',
+    caption: 'Includes one candidate missing a required field, to show how Checksum gracefully excludes it instead of failing the audit',
+    filename: 'checksum_missing_field_demo.csv',
+    recordCount: 5,
+    csvContent: `candidate_id,screening_score,college_tier,is_metro,career_gap_months,experience_years,shortlisted
+C00001,88,3,0,2,4,1
+C00002,72,2,1,0,3,1
+C00003,,3,0,6,2,0
+C00004,91,1,1,0,6,1
+C00005,58,3,0,12,1,0`,
+  },
+  {
+    id: 'bias_flagged',
+    name: 'Historical Decisions (Bias Flagged)',
+    caption: 'Decisions-only dataset for Path 2B, reliably triggers the four-fifths adverse impact flag',
+    filename: 'checksum_historical_decisions_bias.csv',
+    recordCount: 10,
+    csvContent: `candidate_id,screening_score,college_tier,is_metro,career_gap_months,experience_years,shortlisted
+C00001,88,1,1,0,5,1
+C00002,87,1,1,0,4,1
+C00003,86,3,0,6,2,0
+C00004,85,3,0,8,1,0
+C00005,84,3,0,10,2,0
+C00006,90,1,1,0,6,1
+C00007,60,3,0,12,1,0
+C00008,62,3,0,10,2,0
+C00009,89,1,1,1,5,1
+C00010,88,1,1,0,4,1`,
+  },
+];
+
 export const LandingUploadScreen: React.FC<LandingUploadScreenProps> = ({
   onJobCreated,
   className = '',
@@ -44,6 +106,9 @@ export const LandingUploadScreen: React.FC<LandingUploadScreenProps> = ({
 
   // File Upload state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  // Demo dataset menu open state
+  const [isDatasetMenuOpen, setIsDatasetMenuOpen] = useState<boolean>(false);
 
   // External Endpoint state (Path 2a)
   const [externalEndpoint, setExternalEndpoint] = useState<string>('');
@@ -76,31 +141,22 @@ export const LandingUploadScreen: React.FC<LandingUploadScreenProps> = ({
     }
   };
 
-  // Quick sample dataset loader
-  const handleLoadSampleDataset = () => {
-    const csvContent = `candidate_id,gender,age,years_exp,skill_score,education_level,prior_decisions
-CAND_101,Female,34,8,88,Masters,Shortlisted
-CAND_102,Male,29,5,76,Bachelors,Shortlisted
-CAND_103,Female,45,14,92,Doctorate,Shortlisted
-CAND_104,Male,24,2,61,Bachelors,Rejected
-CAND_105,Non-Binary,38,10,84,Masters,Shortlisted
-CAND_106,Female,52,20,95,Masters,Rejected
-CAND_107,Male,31,6,79,Bachelors,Shortlisted
-CAND_108,Female,28,4,82,Masters,Rejected`;
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const sampleFile = new File([blob], 'checksum_candidate_dataset_sample.csv', {
+  // Demo dataset selection handler
+  const handleSelectDemoDataset = (dataset: DemoDataset) => {
+    const blob = new Blob([dataset.csvContent], { type: 'text/csv' });
+    const sampleFile = new File([blob], dataset.filename, {
       type: 'text/csv',
     });
 
     setSelectedFile(sampleFile);
     setApiError(null);
     setSubmittedJob(null);
+    setIsDatasetMenuOpen(false);
 
     addToast({
       type: 'info',
-      title: 'Sample Dataset Loaded',
-      message: 'Loaded checksum_candidate_dataset_sample.csv (8 records, 4 protected classes).',
+      title: `${dataset.name} Loaded`,
+      message: `Loaded ${dataset.filename} (${dataset.recordCount} records). Ready for audit.`,
     });
   };
 
@@ -169,22 +225,25 @@ CAND_108,Female,28,4,82,Masters,Rejected`;
       <div className="relative overflow-hidden rounded-2xl bg-white border border-slate-200/90 p-6 md:p-8 shadow-md">
         <div className="absolute inset-0 bg-grid-pattern opacity-10 pointer-events-none" />
         
-        <div className="relative z-10 space-y-4 max-w-3xl">
-          <div className="flex items-center gap-2.5 flex-wrap">
-            <Badge variant="primary" className="shadow-2xs">
-              <ShieldCheck className="w-3.5 h-3.5 mr-1" />
+        <div className="relative z-10 max-w-3xl space-y-3">
+          {/* Eyebrow Row */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <Badge variant="primary" size="sm" className="shadow-2xs">
+              <ShieldCheck className="w-3.5 h-3.5 mr-1.5 inline-block shrink-0" />
               Ingestion & Audit Pipeline
             </Badge>
-            <span className="text-xs font-mono-tabular text-slate-500 font-medium">
+            <span className="text-xs font-mono-tabular text-slate-500 font-medium tracking-wide">
               Multi-Path Pipeline Architecture
             </span>
           </div>
 
+          {/* Heading */}
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 leading-tight">
             AI Hiring-Bias Audit & Algorithmic Fairness Platform
           </h1>
 
-          <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+          {/* Subtitle Paragraph */}
+          <p className="text-xs sm:text-sm text-slate-600 leading-relaxed max-w-2xl">
             Ingest candidate records, evaluate propensity scores against Checksum's vectorized hiring agent or external REST endpoints, and run counterfactual perturbation tests to audit EEOC 4/5ths Rule compliance.
           </p>
         </div>
@@ -202,15 +261,58 @@ CAND_108,Female,28,4,82,Masters,Rejected`;
             </h2>
           </div>
 
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleLoadSampleDataset}
-            leftIcon={<Sparkles className="w-3.5 h-3.5 text-blue-600" />}
-            className="text-xs text-blue-700 hover:bg-blue-50/80 border border-blue-200/60 self-start sm:self-auto shadow-2xs"
-          >
-            Load Sample Candidates CSV
-          </Button>
+          <div className="relative self-start sm:self-auto">
+            <Button
+              variant="warning"
+              size="md"
+              onClick={() => setIsDatasetMenuOpen((prev) => !prev)}
+              leftIcon={<Sparkles className="w-4 h-4 text-amber-950 shrink-0" />}
+              rightIcon={
+                <ChevronDown
+                  className={`w-4 h-4 text-amber-950 transition-transform duration-200 shrink-0 ${
+                    isDatasetMenuOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              }
+              className="text-xs sm:text-sm font-bold text-amber-950 bg-amber-400 hover:bg-amber-500 active:bg-amber-600 border border-amber-500/80 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer px-4 py-2"
+            >
+              Load Sample Candidates CSV
+            </Button>
+
+            {isDatasetMenuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-20"
+                  onClick={() => setIsDatasetMenuOpen(false)}
+                />
+                <div className="absolute right-0 sm:right-0 left-0 sm:left-auto mt-2 w-80 sm:w-96 rounded-xl bg-white border border-slate-200 shadow-xl z-30 p-2 space-y-1 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-3 py-2 border-b border-slate-100 mb-1">
+                    <p className="text-[11px] font-mono-tabular font-bold text-slate-400 uppercase tracking-wider">
+                      Verified Demo Datasets
+                    </p>
+                  </div>
+                  {DEMO_DATASETS.map((dataset) => (
+                    <button
+                      key={dataset.id}
+                      type="button"
+                      onClick={() => handleSelectDemoDataset(dataset)}
+                      className="w-full text-left p-3 rounded-lg hover:bg-blue-50/80 transition-colors group cursor-pointer space-y-1 border border-transparent hover:border-blue-100"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-slate-900 group-hover:text-blue-700 transition-colors">
+                          {dataset.name}
+                        </span>
+                        <FileSpreadsheet className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-600 shrink-0" />
+                      </div>
+                      <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+                        {dataset.caption}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Path Selection Cards */}

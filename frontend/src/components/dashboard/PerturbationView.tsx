@@ -4,7 +4,6 @@ import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { StatCard } from '../ui/StatCard';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell, TableSortHeader } from '../ui/Table';
-import { ErrorState } from '../ui/ErrorState';
 import { CandidatePerturbationModal } from './CandidatePerturbationModal';
 import { PerturbationResultItem, ShapSummaryItem, ScoreItem } from '../../services/api';
 import {
@@ -14,6 +13,7 @@ import {
   AlertOctagon,
   Scale,
   CheckCircle,
+  ShieldCheck,
   HelpCircle,
   ChevronDown,
   ChevronUp,
@@ -62,8 +62,8 @@ export const PerturbationView: React.FC<PerturbationViewProps> = ({
     if (!scores) return [];
     const copy = [...scores];
     copy.sort((a, b) => {
-      let valA: any = a[scoreSortCol];
-      let valB: any = b[scoreSortCol];
+      let valA: any = a.input_features?.[scoreSortCol] ?? a[scoreSortCol];
+      let valB: any = b.input_features?.[scoreSortCol] ?? b[scoreSortCol];
 
       if (valA === null || valA === undefined) valA = -99999;
       if (valB === null || valB === undefined) valB = -99999;
@@ -85,6 +85,7 @@ export const PerturbationView: React.FC<PerturbationViewProps> = ({
   const skillPct = shapSummary?.skill_reliance_pct ?? 0;
   const pedigreePct = shapSummary?.pedigree_reliance_pct ?? 0;
   const explainMethod = shapSummary?.method || 'N/A';
+  const isPedigreeFlagged = pedigreePct >= 20;
 
   // Feature importances as array sorted by importance
   const featureImportances = React.useMemo(() => {
@@ -98,6 +99,12 @@ export const PerturbationView: React.FC<PerturbationViewProps> = ({
       pct: maxVal > 0 ? (Math.abs(val) / maxVal) * 100 : 0,
     }));
   }, [shapSummary]);
+
+  const maxImportanceVal = React.useMemo(() => {
+    if (featureImportances.length === 0) return 1;
+    const max = Math.max(...featureImportances.map((f) => Math.abs(f.val)));
+    return max > 0 ? max : 1;
+  }, [featureImportances]);
 
   return (
     <div className={`space-y-8 ${className}`}>
@@ -159,7 +166,7 @@ export const PerturbationView: React.FC<PerturbationViewProps> = ({
                   label="Pedigree Reliance"
                   value={`${pedigreePct}%`}
                   subtext={pedigreePct >= 40 ? 'High bias concentration' : pedigreePct >= 20 ? 'Moderate bias leak' : 'Low pedigree leak'}
-                  variant={pedigreePct >= 40 ? 'danger' : pedigreePct >= 20 ? 'warning' : 'default'}
+                  variant={pedigreePct >= 40 ? 'danger' : pedigreePct >= 20 ? 'warning' : 'info'}
                   icon={<Scale className="w-5 h-5" />}
                 />
               </div>
@@ -196,21 +203,35 @@ export const PerturbationView: React.FC<PerturbationViewProps> = ({
               </div>
 
               {featureImportances.length > 0 ? (
-                <div className="space-y-2.5 overflow-y-auto max-h-[220px] pr-1">
-                  {featureImportances.map((f) => (
-                    <div key={f.name} className="space-y-1">
-                      <div className="flex items-center justify-between text-xs font-mono-tabular">
-                        <span className="font-bold text-slate-800">{f.name}</span>
-                        <span className="text-slate-600 font-semibold">{f.val.toFixed(4)}</span>
+                <div className="space-y-3 overflow-y-auto max-h-[220px] pr-1">
+                  {featureImportances.map((f) => {
+                    const isPedigree =
+                      (shapSummary?.pedigree_fields && Array.isArray(shapSummary.pedigree_fields))
+                        ? shapSummary.pedigree_fields.includes(f.name)
+                        : ['college_tier', 'college_name', 'is_metro', 'university_tier', 'zip_code'].some(
+                            (p) => f.name.toLowerCase().includes(p)
+                          );
+                    const barWidthPct = maxImportanceVal > 0 ? (Math.abs(f.val) / maxImportanceVal) * 100 : 0;
+                    const visibleWidth = Math.min(100, Math.max(Math.abs(f.val) > 0 ? 3 : 1.5, barWidthPct));
+
+                    return (
+                      <div key={f.name} className="space-y-1">
+                        <div className="flex items-center justify-between text-xs font-mono-tabular">
+                          <span className="font-bold text-slate-800">{f.name}</span>
+                          <span className="text-slate-700 font-semibold">{f.val.toFixed(4)}</span>
+                        </div>
+                        <div className="h-2 w-full bg-slate-200/90 rounded-full overflow-hidden border border-slate-200/60">
+                          <div
+                            className={`h-full rounded-full transition-all duration-300 ${
+                              isPedigree ? 'bg-amber-500' : 'bg-blue-600'
+                            }`}
+                            style={{ width: `${visibleWidth}%` }}
+                            title={`${f.name}: ${f.val.toFixed(4)}`}
+                          />
+                        </div>
                       </div>
-                      <div className="h-2 w-full bg-slate-200/90 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-blue-600 rounded-full transition-all duration-300"
-                          style={{ width: `${Math.min(100, Math.max(4, f.pct))}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="text-xs text-slate-500 italic py-4">No feature importances declared or computed.</p>
@@ -246,81 +267,80 @@ export const PerturbationView: React.FC<PerturbationViewProps> = ({
         </div>
 
         {perturbationResults && perturbationResults.length > 0 ? (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Field Tested</TableHead>
-                <TableHead>Severity</TableHead>
-                <TableHead>Significant</TableHead>
-                <TableHead className="text-right">Avg Delta (Pts)</TableHead>
-                <TableHead className="text-right">Median Delta</TableHead>
-                <TableHead className="text-right">Range [Min, Max]</TableHead>
-                <TableHead className="text-right">p-value</TableHead>
-                <TableHead className="text-right">Wilcoxon W</TableHead>
-                <TableHead className="text-right">Candidates</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {perturbationResults.map((res) => {
-                const isSig = res.statistically_significant;
-                const severity = (res.severity || 'LOW').toUpperCase();
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4.5">
+            {perturbationResults.map((res) => {
+              const isSig = res.statistically_significant;
+              const deltaVal = res.avg_delta_pts ?? 0;
+              const deltaFormatted = deltaVal > 0 ? `+${deltaVal.toFixed(1)} pts` : `${deltaVal.toFixed(1)} pts`;
 
-                let severityBadge = <Badge variant="success">LOW</Badge>;
-                if (severity === 'HIGH') {
-                  severityBadge = <Badge variant="danger">HIGH</Badge>;
-                } else if (severity === 'MED' || severity === 'MEDIUM') {
-                  severityBadge = <Badge variant="warning">MED</Badge>;
-                }
-
-                return (
-                  <TableRow key={res.field_tested}>
-                    <TableCell className="font-mono-tabular font-bold text-slate-900 text-xs">
-                      {res.field_tested}
-                    </TableCell>
-                    <TableCell>{severityBadge}</TableCell>
-                    <TableCell>
-                      {isSig ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-mono-tabular font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
-                          <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
-                          Significant
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-xs font-mono-tabular font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                          <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                          Pass
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right font-mono-tabular font-extrabold text-xs">
-                      <span className={res.avg_delta_pts < 0 ? 'text-rose-600' : res.avg_delta_pts > 0 ? 'text-blue-600' : 'text-slate-600'}>
-                        {res.avg_delta_pts > 0 ? `+${res.avg_delta_pts.toFixed(2)}` : res.avg_delta_pts.toFixed(2)}
+              return (
+                <Card
+                  key={res.field_tested}
+                  variant="default"
+                  className="p-5 bg-white border border-slate-200/90 shadow-2xs hover:shadow-xs transition-all flex flex-col justify-between space-y-4"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-mono-tabular font-bold text-slate-900 truncate" title={res.field_tested}>
+                        {res.field_tested}
                       </span>
-                    </TableCell>
-                    <TableCell className="text-right font-mono-tabular text-xs">
-                      {res.median_delta_pts.toFixed(2)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono-tabular text-xs text-slate-600">
-                      [{res.min_delta_pts.toFixed(1)}, {res.max_delta_pts.toFixed(1)}]
-                    </TableCell>
-                    <TableCell className="text-right font-mono-tabular font-bold text-xs">
-                      {res.p_value < 0.001 ? '< 0.001' : res.p_value.toFixed(4)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono-tabular text-xs text-slate-600">
-                      {res.wilcoxon_statistic.toFixed(1)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono-tabular text-xs">
-                      {res.n_candidates}
-                      {!!res.n_scoring_errors && (
-                        <span className="block text-[10px] text-rose-600 font-bold">
-                          ({res.n_scoring_errors} err)
-                        </span>
+                      {res.severity && (
+                        <Badge
+                          variant={
+                            res.severity.toUpperCase() === 'HIGH'
+                              ? 'danger'
+                              : res.severity.toUpperCase() === 'MED' || res.severity.toUpperCase() === 'MEDIUM'
+                              ? 'warning'
+                              : 'done'
+                          }
+                          size="sm"
+                        >
+                          {res.severity.toUpperCase()}
+                        </Badge>
                       )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+                    </div>
+
+                    <div className="space-y-1 pt-1">
+                      <span className="text-[11px] font-mono-tabular font-medium text-slate-500 block">Average Delta</span>
+                      <div className="text-2xl sm:text-3xl font-extrabold font-mono-tabular tracking-tight">
+                        <span
+                          className={
+                            isSig
+                              ? 'text-rose-600'
+                              : deltaVal > 0
+                              ? 'text-blue-600'
+                              : deltaVal < 0
+                              ? 'text-amber-600'
+                              : 'text-slate-800'
+                          }
+                        >
+                          {deltaFormatted}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
+                    {isSig ? (
+                      <Badge variant="danger" size="md" icon={<AlertTriangle className="w-3.5 h-3.5" />}>
+                        Significant
+                      </Badge>
+                    ) : (
+                      <Badge variant="done" size="md" icon={<CheckCircle className="w-3.5 h-3.5" />}>
+                        Insignificant
+                      </Badge>
+                    )}
+
+                    {res.p_value !== undefined && (
+                      <span className="text-[11px] font-mono-tabular text-slate-500 font-semibold">
+                        p = {res.p_value < 0.001 ? '< 0.001' : res.p_value.toFixed(3)}
+                      </span>
+                    )}
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
         ) : (
           <p className="text-xs text-slate-500 italic py-4">No field perturbation tests recorded.</p>
         )}
@@ -368,6 +388,39 @@ export const PerturbationView: React.FC<PerturbationViewProps> = ({
                   Candidate ID
                 </TableSortHeader>
                 <TableSortHeader
+                  sortKey="screening_score"
+                  currentSortKey={scoreSortCol}
+                  sortDirection={scoreSortDir}
+                  onSort={handleScoreSort}
+                  className="text-right"
+                >
+                  Screening Score
+                </TableSortHeader>
+                <TableSortHeader
+                  sortKey="college_tier"
+                  currentSortKey={scoreSortCol}
+                  sortDirection={scoreSortDir}
+                  onSort={handleScoreSort}
+                >
+                  College Tier
+                </TableSortHeader>
+                <TableSortHeader
+                  sortKey="is_metro"
+                  currentSortKey={scoreSortCol}
+                  sortDirection={scoreSortDir}
+                  onSort={handleScoreSort}
+                >
+                  Location
+                </TableSortHeader>
+                <TableSortHeader
+                  sortKey="experience_years"
+                  currentSortKey={scoreSortCol}
+                  sortDirection={scoreSortDir}
+                  onSort={handleScoreSort}
+                >
+                  Experience
+                </TableSortHeader>
+                <TableSortHeader
                   sortKey="score"
                   currentSortKey={scoreSortCol}
                   sortDirection={scoreSortDir}
@@ -395,12 +448,112 @@ export const PerturbationView: React.FC<PerturbationViewProps> = ({
                 const isShortlisted =
                   ['shortlisted', 'selected', 'hired', '1', 'true', 'yes'].includes(decisionStr.toLowerCase());
 
+                // Extract feature values directly from c.input_features
+                const inputFeats = c.input_features || {};
+
+                const rawScreening = inputFeats.screening_score;
+                const screeningScore =
+                  rawScreening !== null && rawScreening !== undefined && rawScreening !== ''
+                    ? Number(rawScreening)
+                    : null;
+                const validScreening = screeningScore !== null && !isNaN(screeningScore);
+
+                const rawTier = inputFeats.college_tier;
+                const collegeTierStr =
+                  rawTier !== null && rawTier !== undefined && rawTier !== ''
+                    ? String(rawTier).trim()
+                    : null;
+                const formattedTier = collegeTierStr
+                  ? collegeTierStr.startsWith('Tier')
+                    ? collegeTierStr
+                    : `Tier ${collegeTierStr}`
+                  : null;
+
+                const rawMetro = inputFeats.is_metro;
+                let locationStr: string | null = null;
+                if (rawMetro !== null && rawMetro !== undefined && rawMetro !== '') {
+                  const metroLower = String(rawMetro).toLowerCase().trim();
+                  if (rawMetro === 1 || rawMetro === '1' || rawMetro === true || metroLower === 'true' || metroLower === 'metro') {
+                    locationStr = 'Metro';
+                  } else if (rawMetro === 0 || rawMetro === '0' || rawMetro === false || metroLower === 'false' || metroLower === 'non-metro') {
+                    locationStr = 'Non-Metro';
+                  } else {
+                    locationStr = String(rawMetro);
+                  }
+                }
+
+                const rawExpYears = inputFeats.experience_years;
+                const rawGapMonths = inputFeats.career_gap_months;
+
+                const expNum =
+                  rawExpYears !== null && rawExpYears !== undefined && rawExpYears !== ''
+                    ? Number(rawExpYears)
+                    : null;
+                const gapNum =
+                  rawGapMonths !== null && rawGapMonths !== undefined && rawGapMonths !== ''
+                    ? Number(rawGapMonths)
+                    : null;
+
+                const validExp = expNum !== null && !isNaN(expNum);
+                const validGap = gapNum !== null && !isNaN(gapNum);
+
+                let experienceText: string | null = null;
+                if (validExp && validGap) {
+                  experienceText = `${expNum} yrs (${gapNum}m gap)`;
+                } else if (validExp) {
+                  experienceText = `${expNum} yrs`;
+                } else if (validGap) {
+                  experienceText = `${gapNum}m gap`;
+                }
+
                 return (
                   <TableRow key={c.candidate_id}>
-                    <TableCell className="font-mono-tabular font-bold text-slate-900 text-xs">
+                    <TableCell className="font-mono-tabular font-bold text-slate-900 text-xs whitespace-nowrap">
                       {c.candidate_id}
                     </TableCell>
-                    <TableCell className="text-right">
+
+                    {/* Screening Score (raw input score) */}
+                    <TableCell className="text-right whitespace-nowrap font-mono-tabular">
+                      {validScreening ? (
+                        <span className="font-semibold text-slate-800 text-xs">
+                          {screeningScore.toFixed(1)}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 font-normal text-xs">—</span>
+                      )}
+                    </TableCell>
+
+                    {/* College Tier */}
+                    <TableCell className="whitespace-nowrap">
+                      {formattedTier ? (
+                        <Badge variant="neutral" size="sm">
+                          {formattedTier}
+                        </Badge>
+                      ) : (
+                        <span className="text-slate-400 font-normal text-xs font-mono-tabular">—</span>
+                      )}
+                    </TableCell>
+
+                    {/* Location (is_metro) */}
+                    <TableCell className="whitespace-nowrap font-mono-tabular text-xs text-slate-700">
+                      {locationStr ? (
+                        <span>{locationStr}</span>
+                      ) : (
+                        <span className="text-slate-400 font-normal text-xs">—</span>
+                      )}
+                    </TableCell>
+
+                    {/* Experience */}
+                    <TableCell className="whitespace-nowrap font-mono-tabular text-xs text-slate-700">
+                      {experienceText ? (
+                        <span>{experienceText}</span>
+                      ) : (
+                        <span className="text-slate-400 font-normal text-xs">—</span>
+                      )}
+                    </TableCell>
+
+                    {/* Model Score */}
+                    <TableCell className="text-right whitespace-nowrap">
                       {hasScore ? (
                         <span className="font-mono-tabular font-extrabold text-sm text-slate-900">
                           {c.score?.toFixed(1)}
@@ -411,7 +564,9 @@ export const PerturbationView: React.FC<PerturbationViewProps> = ({
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell>
+
+                    {/* Decision */}
+                    <TableCell className="whitespace-nowrap">
                       {isShortlisted ? (
                         <Badge variant="success" size="sm">
                           {decisionStr}
@@ -422,18 +577,22 @@ export const PerturbationView: React.FC<PerturbationViewProps> = ({
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell className="text-xs text-slate-500">
+
+                    {/* Field Status / Missing */}
+                    <TableCell className="text-xs text-slate-500 whitespace-nowrap font-mono-tabular">
                       {c.missing_fields && c.missing_fields.length > 0 ? (
-                        <span className="text-rose-600 font-mono-tabular">
+                        <span className="text-rose-600 font-semibold">
                           Missing: {c.missing_fields.join(', ')}
                         </span>
                       ) : c.error ? (
-                        <span className="text-rose-600 font-mono-tabular">{c.error}</span>
+                        <span className="text-rose-600 font-semibold">{c.error}</span>
                       ) : (
-                        <span className="text-emerald-700 font-mono-tabular">Complete</span>
+                        <span className="text-emerald-700 font-semibold">Complete</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-right">
+
+                    {/* What-If Test Action */}
+                    <TableCell className="text-right whitespace-nowrap">
                       <Button
                         variant="outline"
                         size="sm"

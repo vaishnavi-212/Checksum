@@ -54,6 +54,19 @@ export interface ScoreItem {
   decision?: string;
   missing_fields?: string[];
   error?: string;
+  input_features?: {
+    screening_score?: number | string | null;
+    college_tier?: number | string | null;
+    is_metro?: number | string | boolean | null;
+    experience_years?: number | string | null;
+    career_gap_months?: number | string | null;
+    [key: string]: any;
+  };
+  screening_score?: number | string | null;
+  college_tier?: number | string | null;
+  is_metro?: number | string | boolean | null;
+  experience_years?: number | string | null;
+  career_gap_months?: number | string | null;
   [key: string]: any;
 }
 
@@ -184,7 +197,7 @@ export interface PerturbCandidateResponse {
   delta: number;
 }
 
-const API_BASE = '';
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'https://checksum-production.up.railway.app').replace(/\/+$/, '');
 
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {

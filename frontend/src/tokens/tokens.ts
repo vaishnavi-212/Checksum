@@ -101,6 +101,27 @@ export const TOKENS = {
         glow: 'shadow-2xs hover:border-sky-300',
         label: 'Information',
       },
+      success: {
+        bg: 'bg-emerald-50/90',
+        border: 'border-emerald-200 border-l-emerald-500',
+        text: 'text-emerald-800',
+        glow: 'shadow-2xs hover:border-emerald-300',
+        label: 'Success',
+      },
+      warning: {
+        bg: 'bg-amber-50/90',
+        border: 'border-amber-200 border-l-amber-500',
+        text: 'text-amber-800',
+        glow: 'shadow-2xs hover:border-amber-300',
+        label: 'Warning',
+      },
+      danger: {
+        bg: 'bg-rose-50/90',
+        border: 'border-rose-200 border-l-rose-500',
+        text: 'text-rose-800',
+        glow: 'shadow-2xs hover:border-rose-300',
+        label: 'Danger',
+      },
     },
   },
 

@@ -28,6 +28,7 @@ import {
   Check,
   AlertCircle,
   BarChart2,
+  Minus,
 } from 'lucide-react';
 
 export interface MitigationPanelProps {
@@ -145,10 +146,32 @@ export const MitigationPanel: React.FC<MitigationPanelProps> = ({
   const deltaPct = beforePct !== null && afterPct !== null ? afterPct - beforePct : null;
   const meta: MitigationMeta | undefined = fixData?.mitigation_meta;
 
+  // Compute honest outcome badge and description from real values
+  let outcomeBadgeVariant: 'success' | 'danger' | 'neutral' = 'neutral';
+  let outcomeBadgeText = 'NO SIGNIFICANT CHANGE';
+  let outcomeDescription = 'Baseline candidate predictions exhibited no significant subgroup score disparities prior to mitigation. Model predictions remained stable.';
+
+  if (beforePct !== null && afterPct !== null && deltaPct !== null) {
+    if (isImproved && deltaPct < 0) {
+      outcomeBadgeVariant = 'success';
+      outcomeBadgeText = `REDUCED RELIANCE (${deltaPct.toFixed(1)} pts)`;
+      outcomeDescription = `Subgroup mean score adjustment reduced pedigree/proxy reliance by ${Math.abs(deltaPct).toFixed(1)} percentage points, from ${beforePct.toFixed(1)}% down to ${afterPct.toFixed(1)}%.`;
+    } else if (!isImproved && deltaPct > 1.0) {
+      outcomeBadgeVariant = 'danger';
+      outcomeBadgeText = `RELIANCE INCREASED (+${deltaPct.toFixed(1)} pts)`;
+      outcomeDescription = `Group-mean score adjustment increased pedigree/proxy reliance by ${deltaPct.toFixed(1)} percentage points (from ${beforePct.toFixed(1)}% to ${afterPct.toFixed(1)}%), despite equalizing group-mean scores. This mitigation strategy may not be reducing the model's attributable reliance on protected/proxy attributes.`;
+    } else {
+      outcomeBadgeVariant = 'neutral';
+      outcomeBadgeText = 'NO SIGNIFICANT CHANGE';
+      const deltaSign = deltaPct > 0 ? '+' : '';
+      outcomeDescription = `Group-mean score adjustment produced no significant change in pedigree/proxy reliance (${beforePct.toFixed(1)}% vs ${afterPct.toFixed(1)}%, delta: ${deltaSign}${deltaPct.toFixed(1)} pts). Model feature importance remained stable.`;
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header Banner & Action Button */}
-      <Card variant="default" padding="lg" className="border-l-4 border-l-blue-600 bg-white">
+      <Card variant="default" className="p-6 border-l-4 border-l-blue-600 bg-white">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
@@ -157,12 +180,12 @@ export const MitigationPanel: React.FC<MitigationPanelProps> = ({
                 Automated Bias Mitigation & Policy Adjustment
               </h2>
               {isFixDone && (
-                <Badge variant="success" size="sm">
+                <Badge variant="done" size="sm">
                   Mitigation Applied
                 </Badge>
               )}
               {isFixRunning && (
-                <Badge variant="warning" size="sm" icon={<RotateCw className="w-3 h-3 animate-spin" />}>
+                <Badge variant="running" size="sm" icon={<RotateCw className="w-3 h-3 animate-spin" />}>
                   Running Fix
                 </Badge>
               )}
@@ -226,7 +249,7 @@ export const MitigationPanel: React.FC<MitigationPanelProps> = ({
 
       {/* Running State */}
       {isFixRunning && (
-        <Card variant="default" padding="lg" className="bg-slate-900 text-slate-100 border-slate-800">
+        <Card variant="default" className="p-6 bg-slate-900 text-slate-100 border-slate-800">
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -247,7 +270,7 @@ export const MitigationPanel: React.FC<MitigationPanelProps> = ({
               </Badge>
             </div>
 
-            <ProgressBar progress={65} status="running" label="Recalibrating model predictions..." />
+            <ProgressBar value={65} status="warning" label="Recalibrating model predictions..." />
           </div>
         </Card>
       )}
@@ -255,79 +278,149 @@ export const MitigationPanel: React.FC<MitigationPanelProps> = ({
       {/* Finished Mitigation Results Display */}
       {isFixDone && !isFixRunning && fixData && (
         <div className="space-y-6">
-          {/* Top Metric Comparison Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <StatCard
-              title="Pedigree Reliance (Before)"
-              value={beforePct !== null ? `${beforePct.toFixed(1)}%` : 'N/A'}
-              subtitle="Pre-mitigation pedigree weight"
-              variant="default"
-              icon={<BarChart2 className="w-5 h-5 text-slate-400" />}
-            />
+          {/* Top Metric Comparison Grid — Side-by-Side Outcome Cards */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            {/* 1. Pre-Mitigation Baseline Card */}
+            <Card variant="default" className="p-5 bg-slate-50/90 border-slate-200/90 shadow-2xs flex flex-col justify-between space-y-4 h-full">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono-tabular font-bold text-slate-500 uppercase tracking-wider">
+                    BEFORE MITIGATION
+                  </span>
+                  <Badge variant="neutral" size="sm">
+                    Baseline Model
+                  </Badge>
+                </div>
 
-            <StatCard
-              title="Pedigree Reliance (After)"
-              value={afterPct !== null ? `${afterPct.toFixed(1)}%` : 'N/A'}
-              subtitle="Post-mitigation pedigree weight"
-              variant={isImproved ? 'success' : 'default'}
-              trend={
-                deltaPct !== null
-                  ? {
-                      direction: deltaPct < 0 ? 'down' : 'up',
-                      value: `${Math.abs(deltaPct).toFixed(1)}%`,
-                    }
-                  : undefined
-              }
-              icon={<ShieldCheck className="w-5 h-5 text-emerald-500" />}
-            />
-
-            <Card variant="default" padding="md" className="flex flex-col justify-between">
-              <div>
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">
-                  Mitigation Outcome
-                </span>
-                <div className="mt-2 flex items-center gap-2">
-                  {isImproved ? (
-                    <Badge variant="success" size="md" icon={<Check className="w-3.5 h-3.5" />}>
-                      Pedigree Reliance Reduced
-                    </Badge>
-                  ) : (
-                    <Badge variant="neutral" size="md">
-                      Minimal Shift Detected
-                    </Badge>
-                  )}
+                <div className="space-y-1">
+                  <div className="text-2xl font-extrabold font-mono-tabular text-slate-900">
+                    {beforePct !== null ? `${beforePct.toFixed(1)}%` : 'N/A'}
+                  </div>
+                  <span className="text-xs font-semibold text-slate-600 block">
+                    Pedigree & Proxy Feature Reliance
+                  </span>
                 </div>
               </div>
-              <div className="text-xs text-slate-500 font-mono-tabular mt-2">
-                Strategy: <strong className="text-slate-900">{fixData.strategy_applied || 'group_mean_adjustment'}</strong>
+
+              <div className="p-2.5 rounded-lg bg-white border border-slate-200/80 text-[11px] text-slate-500 leading-normal font-mono-tabular">
+                Initial weight assigned to non-merit demographic and pedigree proxies prior to adjustment.
+              </div>
+            </Card>
+
+            {/* 2. Post-Mitigation Recalibrated Card */}
+            <Card
+              variant="default"
+              className={`p-5 flex flex-col justify-between space-y-4 h-full transition-all ${
+                isImproved
+                  ? 'bg-emerald-50/40 border-emerald-300/90 shadow-sm ring-1 ring-emerald-500/10'
+                  : 'bg-slate-50/90 border-slate-200 shadow-2xs'
+              }`}
+            >
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono-tabular font-bold text-slate-500 uppercase tracking-wider">
+                    AFTER MITIGATION
+                  </span>
+                  <Badge variant={isImproved ? 'done' : 'neutral'} size="sm">
+                    {isImproved ? 'Recalibrated' : 'Post-Adjustment'}
+                  </Badge>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="text-2xl font-extrabold font-mono-tabular text-slate-900 flex items-center gap-2 flex-wrap">
+                    <span>{afterPct !== null ? `${afterPct.toFixed(1)}%` : 'N/A'}</span>
+                    {deltaPct !== null && (
+                      Math.abs(deltaPct) <= 0.01 || beforePct === afterPct ? (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-200/80 text-slate-700 border border-slate-300/70 font-mono-tabular inline-flex items-center gap-1">
+                          <Minus className="w-3 h-3 text-slate-500" />
+                          No significant change
+                        </span>
+                      ) : deltaPct < 0 ? (
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 font-mono-tabular inline-flex items-center gap-1">
+                          <TrendingDown className="w-3 h-3 text-emerald-700" />
+                          {deltaPct.toFixed(1)}%
+                        </span>
+                      ) : (
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200 font-mono-tabular">
+                          +{deltaPct.toFixed(1)}%
+                        </span>
+                      )
+                    )}
+                  </div>
+                  <span className="text-xs font-semibold text-slate-600 block">
+                    Post-Mitigation Pedigree Reliance
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-white border border-slate-200/80 text-[11px] text-slate-500 leading-normal font-mono-tabular">
+                Adjusted weight following post-scoring group-mean score equalization across demographic tiers.
+              </div>
+            </Card>
+
+            {/* 3. Mitigation Outcome Analysis Card */}
+            <Card variant="default" className="p-5 bg-white border-slate-200 flex flex-col justify-between space-y-4 h-full shadow-2xs">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono-tabular font-bold text-slate-500 uppercase tracking-wider block">
+                    MITIGATION OUTCOME
+                  </span>
+                  <Badge variant="info" size="sm">
+                    Policy Summary
+                  </Badge>
+                </div>
+
+                <div className="space-y-2">
+                  <Badge variant={outcomeBadgeVariant} size="md">
+                    {outcomeBadgeText}
+                  </Badge>
+
+                  <p className="text-xs text-slate-600 leading-relaxed font-mono-tabular mt-1.5">
+                    {outcomeDescription}
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/80 text-[11px] text-slate-600 leading-normal font-mono-tabular flex items-center justify-between">
+                <span>Applied Strategy:</span>
+                <strong className="text-slate-900 font-bold">{fixData.strategy_applied || 'group_mean_adjustment'}</strong>
               </div>
             </Card>
           </div>
 
           {/* Audit Transparency & Candidate Exclusion Disclosures */}
           {meta && (
-            <Card variant="default" padding="md" className="bg-slate-50 border-slate-200">
-              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-3">
-                Candidate Batch Ingestion Metadata
-              </h3>
+            <Card variant="default" className="p-5 bg-slate-50/80 border-slate-200/90 shadow-2xs">
+              <div className="flex items-center justify-between border-b border-slate-200/60 pb-2.5 mb-3">
+                <div className="flex items-center gap-2">
+                  <Sliders className="w-3.5 h-3.5 text-slate-500" />
+                  <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Candidate Batch Ingestion Metadata
+                  </h3>
+                </div>
+                <Badge variant="neutral" size="sm">
+                  Batch Disclosures
+                </Badge>
+              </div>
+
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs font-mono-tabular">
-                <div>
-                  <span className="text-slate-400 block text-[11px] uppercase">Total Records</span>
-                  <span className="text-sm font-bold text-slate-900">{meta.n_total_candidates ?? 'N/A'}</span>
+                <div className="p-2.5 rounded-lg bg-white border border-slate-200/80 space-y-0.5">
+                  <span className="text-slate-400 block text-[10px] font-bold uppercase tracking-wider">Total Records</span>
+                  <span className="text-base font-extrabold text-slate-900">{meta.n_total_candidates ?? 'N/A'}</span>
                 </div>
-                <div>
-                  <span className="text-slate-400 block text-[11px] uppercase">Scored Candidates</span>
-                  <span className="text-sm font-bold text-emerald-700">{meta.n_candidates_used ?? 'N/A'}</span>
+                <div className="p-2.5 rounded-lg bg-white border border-slate-200/80 space-y-0.5">
+                  <span className="text-slate-400 block text-[10px] font-bold uppercase tracking-wider">Scored Candidates</span>
+                  <span className="text-base font-extrabold text-emerald-700">{meta.n_candidates_used ?? 'N/A'}</span>
                 </div>
-                <div>
-                  <span className="text-slate-400 block text-[11px] uppercase">Scoring Errors</span>
-                  <span className={`text-sm font-bold ${(meta.n_scoring_errors ?? 0) > 0 ? 'text-amber-600' : 'text-slate-700'}`}>
+                <div className="p-2.5 rounded-lg bg-white border border-slate-200/80 space-y-0.5">
+                  <span className="text-slate-400 block text-[10px] font-bold uppercase tracking-wider">Scoring Errors</span>
+                  <span className={`text-base font-extrabold ${(meta.n_scoring_errors ?? 0) > 0 ? 'text-amber-600' : 'text-slate-700'}`}>
                     {meta.n_scoring_errors ?? 0}
                   </span>
                 </div>
-                <div>
-                  <span className="text-slate-400 block text-[11px] uppercase">Dropped Groups</span>
-                  <span className="text-sm font-bold text-slate-700">
+                <div className="p-2.5 rounded-lg bg-white border border-slate-200/80 space-y-0.5">
+                  <span className="text-slate-400 block text-[10px] font-bold uppercase tracking-wider">Dropped Groups</span>
+                  <span className="text-sm font-bold text-slate-700 truncate block" title={meta.groups_dropped?.join(', ')}>
                     {meta.groups_dropped && meta.groups_dropped.length > 0 ? meta.groups_dropped.join(', ') : 'None'}
                   </span>
                 </div>
@@ -337,20 +430,25 @@ export const MitigationPanel: React.FC<MitigationPanelProps> = ({
 
           {/* After-Mitigation SHAP Feature Breakdown */}
           {fixData.after_summary && (
-            <Card variant="default" padding="lg">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
-                <div className="flex items-center gap-2">
-                  <BarChart2 className="w-4 h-4 text-blue-600" />
-                  <h3 className="text-sm font-bold text-slate-900">
-                    Post-Mitigation Feature Reliance Breakdown
-                  </h3>
+            <Card variant="default" className="p-6 bg-white border-slate-200 shadow-md">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4 mb-5">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <BarChart2 className="w-4 h-4 text-blue-600" />
+                    <h3 className="text-base font-bold text-slate-900">
+                      Post-Mitigation Feature Reliance Breakdown
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Recalibrated SHAP importance weights following group-mean bias mitigation
+                  </p>
                 </div>
                 <Badge variant="info" size="sm">
                   SHAP Recalibrated
                 </Badge>
               </div>
 
-              <div className="space-y-3 font-mono-tabular">
+              <div className="space-y-4 font-mono-tabular">
                 {(() => {
                   const summary = fixData.after_summary;
                   let featuresList: Array<{ name: string; pct: number; isPedigree?: boolean }> = [];
@@ -365,35 +463,92 @@ export const MitigationPanel: React.FC<MitigationPanelProps> = ({
                     featuresList = Object.entries(summary.feature_importances).map(([fname, val]) => ({
                       name: fname,
                       pct: typeof val === 'number' ? val : 0,
-                      isPedigree: ['college_tier', 'college_name', 'is_metro'].includes(fname),
+                      isPedigree:
+                        (summary?.pedigree_fields && Array.isArray(summary.pedigree_fields))
+                          ? summary.pedigree_fields.includes(fname)
+                          : ['college_tier', 'college_name', 'is_metro', 'university_tier', 'zip_code'].some(
+                              (p) => fname.toLowerCase().includes(p)
+                            ),
                     }));
                   }
 
                   if (featuresList.length === 0) {
-                    return <p className="text-xs text-slate-500">No feature breakdown available.</p>;
+                    return <p className="text-xs text-slate-500 italic py-2">No feature breakdown available.</p>;
                   }
 
-                  return featuresList.map((feat, idx) => (
-                    <div key={idx} className="space-y-1">
-                      <div className="flex justify-between text-xs">
-                        <span className="font-medium text-slate-800 flex items-center gap-1.5">
-                          {feat.name}
-                          {feat.isPedigree && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] bg-rose-50 text-rose-600 border border-rose-200">
-                              Pedigree
-                            </span>
-                          )}
-                        </span>
-                        <span className="font-bold text-slate-700">{feat.pct.toFixed(1)}%</span>
+                  // Find max percentage to scale relative bars accurately
+                  const maxPct = Math.max(...featuresList.map((f) => f.pct), 1);
+
+                  return (
+                    <div className="space-y-4">
+                      <div className="space-y-3 pt-1">
+                        {featuresList.map((feat, idx) => {
+                          const isPedigree =
+                            feat.isPedigree ||
+                            ((summary?.pedigree_fields && Array.isArray(summary.pedigree_fields))
+                              ? summary.pedigree_fields.includes(feat.name)
+                              : ['college_tier', 'college_name', 'is_metro', 'university_tier', 'zip_code'].some(
+                                  (p) => feat.name.toLowerCase().includes(p)
+                                ));
+
+                          const relativeBarPct = (feat.pct / maxPct) * 100;
+                          // Ensure every non-zero feature is visually legible with minimum 3% rendered bar width
+                          const visibleBarPct = Math.max(feat.pct > 0 ? 3 : 1.5, relativeBarPct);
+
+                          return (
+                            <div key={idx} className="flex items-center gap-3 text-xs font-mono-tabular">
+                              {/* Feature Name & Pill */}
+                              <div className="w-32 sm:w-40 shrink-0 flex items-center justify-between pr-2">
+                                <span className="font-bold text-slate-800 truncate" title={feat.name}>
+                                  {feat.name}
+                                </span>
+                                <span
+                                  className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
+                                    isPedigree
+                                      ? 'bg-amber-100 text-amber-800 border border-amber-200/80'
+                                      : 'bg-blue-100 text-blue-800 border border-blue-200/80'
+                                  }`}
+                                >
+                                  {isPedigree ? 'Pedigree' : 'Skill'}
+                                </span>
+                              </div>
+
+                              {/* Horizontal Fill Bar */}
+                              <div className="flex-1 h-3.5 bg-slate-200/80 rounded-full overflow-hidden border border-slate-200/60 relative">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-500 ${
+                                    isPedigree ? 'bg-amber-500' : 'bg-blue-600'
+                                  }`}
+                                  style={{ width: `${visibleBarPct}%` }}
+                                  title={`${feat.name}: ${feat.pct.toFixed(2)}%`}
+                                />
+                              </div>
+
+                              {/* Numeric Value */}
+                              <div className="w-14 text-right font-bold text-slate-800 font-mono-tabular">
+                                {feat.pct.toFixed(1)}%
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${feat.isPedigree ? 'bg-amber-500' : 'bg-blue-600'}`}
-                          style={{ width: `${Math.min(100, Math.max(0, feat.pct))}%` }}
-                        />
+
+                      {/* Scale Axis at bottom matching the range */}
+                      <div className="pt-2 border-t border-slate-200/80">
+                        <div className="flex items-center gap-3 font-mono-tabular text-[10px] text-slate-500">
+                          <div className="w-32 sm:w-40 shrink-0 text-right pr-2 font-semibold">Scale Axis</div>
+                          <div className="flex-1 flex justify-between px-0.5 font-semibold text-slate-600">
+                            <span>0.0%</span>
+                            <span>{(maxPct * 0.25).toFixed(1)}%</span>
+                            <span>{(maxPct * 0.50).toFixed(1)}%</span>
+                            <span>{(maxPct * 0.75).toFixed(1)}%</span>
+                            <span>{maxPct.toFixed(1)}%</span>
+                          </div>
+                          <div className="w-14 text-right font-bold text-slate-700">% Weight</div>
+                        </div>
                       </div>
                     </div>
-                  ));
+                  );
                 })()}
               </div>
             </Card>

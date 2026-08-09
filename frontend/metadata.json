@@ -1,6 +1,8 @@
 {
-  "name": "Checksum",
+  "name": "Checksum-v3.0",
   "description": "AI hiring-bias audit platform frontend",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
