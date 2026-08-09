@@ -424,7 +424,7 @@ def node_audit_stats_only(state: CheckSumState) -> dict:
     from agents.audit_agent import AuditAgent
 
     audit_agent = AuditAgent(model=None)
-    statistical_results = audit_agent.run_statistical_audit(state.get("records", []))
+    statistical_results = audit_agent.run_multi_field_statistical_audit(state.get("records", []))
 
     return {
         "statistical_results": statistical_results,

@@ -536,6 +536,14 @@ class AuditAgent:
         decisions already present in the uploaded data — no model access
         required. Matched-pair statistics (Tier 3 depth) are listed in the
         README as "Not yet built" and are intentionally not faked here.
+
+        Single-field primitive: audits ONE group_field at a time. Kept
+        exactly as-is (same signature, same return shape) for backward
+        compatibility with any existing caller that wants a specific
+        field's result directly - run_multi_field_statistical_audit below
+        is the orchestration-facing entry point that now uses this to
+        cover every bias field present in the data, not just the single
+        college_tier default.
         """
         groups: dict[str, list] = {}
         for r in records:
@@ -591,6 +599,68 @@ class AuditAgent:
             "demographic_parity": demographic_parity,
             "matched_pair": matched_pair,
         }
+
+    def run_multi_field_statistical_audit(
+        self,
+        records: list[dict],
+        group_fields: Optional[list[str]] = None,
+        outcome_field: str = "shortlisted",
+    ) -> dict:
+        """
+        Tier 3, extended: runs run_statistical_audit() independently for
+        EVERY bias-relevant field actually present in this dataset (e.g.
+        gender, age, college_tier, is_metro, career_gap_months) - not just
+        the single hardcoded "college_tier" default. Without this, a
+        Path 2B (decisions-only) audit could badly under-represent a model
+        that discriminates by gender or age, since college_tier was the
+        only field ever checked for adverse impact in Tier 3 mode.
+
+        Backward compatible: the primary field's result (college_tier,
+        preferred if present in the data; otherwise the first available
+        bias field) is returned at the TOP LEVEL with the exact same shape
+        run_statistical_audit already produces, so any existing caller
+        reading group_field/outcome_field/n_groups/selection_rates/
+        four_fifths_rule/demographic_parity/matched_pair directly continues
+        to work unchanged. Every other bias field's full result is added
+        under the new "additional_group_audits" key, keyed by field name -
+        purely additive, never reshaping or removing anything from the
+        original single-field structure.
+        """
+        fields_to_check = group_fields or list(BIAS_FIELDS)
+
+        # Only test fields genuinely present on at least one record - same
+        # "never guess, only report on what's real" principle already used
+        # in run_perturbation_suite's test_fields filtering above.
+        fields_present = [
+            f for f in fields_to_check
+            if any(r.get(f) not in (None, "") for r in records)
+        ]
+
+        if not fields_present:
+            # Nothing usable at all - return the same shape
+            # run_statistical_audit gives for a totally-missing field, so
+            # callers don't need two different "no data" branches to handle.
+            return self.run_statistical_audit(records, group_field="college_tier", outcome_field=outcome_field)
+
+        primary_field = "college_tier" if "college_tier" in fields_present else fields_present[0]
+        primary_result = self.run_statistical_audit(
+            records, group_field=primary_field, outcome_field=outcome_field
+        )
+
+        additional_results: dict[str, dict] = {}
+        for f in fields_present:
+            if f == primary_field:
+                continue
+            result = self.run_statistical_audit(records, group_field=f, outcome_field=outcome_field)
+            # Skip fields that end up with fewer than 2 usable groups (e.g.
+            # every record shares the same value for this field) rather
+            # than cluttering the response with a degenerate single-group
+            # "comparison" that can't actually show disparate impact.
+            if result.get("n_groups", 0) >= 2:
+                additional_results[f] = result
+
+        primary_result["additional_group_audits"] = additional_results
+        return primary_result
 
     @staticmethod
     def demographic_parity(
