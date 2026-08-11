@@ -119,43 +119,41 @@ export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({
   return (
     <div className={`space-y-8 ${className}`}>
       {/* 1. Header & Navigation Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200/80 pb-5">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 border-b border-slate-200/80 pb-4 sm:pb-5">
+        <div className="space-y-1.5 w-full sm:w-auto">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-lg sm:text-2xl font-extrabold text-slate-900 tracking-tight">
+              Algorithmic Bias Audit Report
+            </h1>
+            <Badge variant={isPerturbationMode ? 'primary' : 'warning'} size="sm" className="shrink-0">
+              {isPerturbationMode ? 'Perturbation Audit' : 'Statistical-Only Audit'}
+            </Badge>
+          </div>
+          <p className="text-xs text-slate-500 font-mono-tabular">
+            Job ID: <code className="font-bold text-slate-800">{jobId}</code>
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
           {onBackToUpload && (
             <Button
               variant="outline"
               size="sm"
               onClick={onBackToUpload}
               leftIcon={<ArrowLeft className="w-3.5 h-3.5" />}
-              className="bg-white text-slate-700 hover:bg-slate-50 border-slate-200 shadow-2xs"
+              className="bg-white text-slate-700 hover:bg-slate-50 border-slate-200 shadow-2xs text-xs font-semibold"
             >
               New Audit Job
             </Button>
           )}
 
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-                Algorithmic Bias Audit Report
-              </h1>
-              <Badge variant={isPerturbationMode ? 'primary' : 'warning'} size="md">
-                {isPerturbationMode ? 'Perturbation Audit' : 'Statistical-Only Audit'}
-              </Badge>
-            </div>
-            <p className="text-xs text-slate-500 font-mono-tabular">
-              Job ID: <code className="font-bold text-slate-800">{jobId}</code>
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
           <Button
             variant="ghost"
             size="sm"
             onClick={() => fetchResultsData(true)}
             isLoading={isRefreshing}
             leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
-            className="text-xs text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 shadow-2xs"
+            className="text-xs text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 shadow-2xs font-semibold"
           >
             Refresh
           </Button>

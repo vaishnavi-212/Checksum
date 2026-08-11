@@ -376,6 +376,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onHowItW
     });
   };
 
+  // Helper to calculate exact scroll step (card width + gap) dynamically
+  const getScrollStep = () => {
+    if (!carouselRef.current) return 320;
+    const firstCard = carouselRef.current.firstElementChild as HTMLElement | null;
+    if (firstCard) {
+      const gap = window.innerWidth < 640 ? 16 : 24;
+      return firstCard.offsetWidth + gap;
+    }
+    return window.innerWidth < 640 ? 296 : 364;
+  };
+
   // Automatic moving carousel effect
   useEffect(() => {
     if (isCarouselHovered) return;
@@ -383,8 +394,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onHowItW
     const interval = setInterval(() => {
       if (carouselRef.current) {
         const { scrollLeft, scrollWidth, clientWidth } = carouselRef.current;
-        // Shift exactly one card width (340px card + 24px gap = 364px)
-        const step = 364;
+        const step = getScrollStep();
         if (scrollLeft + clientWidth >= scrollWidth - 30) {
           smoothScrollTo(0);
         } else {
@@ -398,7 +408,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onHowItW
 
   const scrollCarousel = (direction: 'left' | 'right') => {
     if (carouselRef.current) {
-      const step = 364;
+      const step = getScrollStep();
       const currentScroll = carouselRef.current.scrollLeft;
       const target = direction === 'left' ? currentScroll - step : currentScroll + step;
       smoothScrollTo(target);
@@ -486,7 +496,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onHowItW
   ];
 
   return (
-    <div className="space-y-8 sm:space-y-10 pb-8">
+    <div className="space-y-8 sm:space-y-12 pb-8">
       {/* Hero Section */}
       <section className="relative pt-1 sm:pt-2 pb-2">
         {/* 2-Column Grid: Headline & Subhead on Left, 3D Moving Illustration on Right */}
@@ -564,7 +574,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onHowItW
           transition={{ duration: 0.6, delay: 0.2 }}
           className="mt-6 sm:mt-8 p-[1px] rounded-2xl bg-gradient-to-r from-blue-500/40 via-indigo-500/30 to-blue-600/40 shadow-xl"
         >
-          <div className="rounded-[15px] bg-slate-900/95 p-5 sm:p-6 relative overflow-hidden backdrop-blur-md">
+          <div className="rounded-[15px] bg-slate-900/95 p-6 sm:p-8 relative overflow-hidden backdrop-blur-md">
             <div className="absolute top-0 right-0 w-36 h-36 bg-blue-600/15 rounded-full blur-2xl pointer-events-none" />
             
             <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-800">
@@ -624,12 +634,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onHowItW
       {/* "What is Checksum?" Section - Nicer Glowing Card Effects & Poetic Copy */}
       <section id="what-is-checksum" className="scroll-mt-20">
         <div className="p-[1px] rounded-2xl bg-gradient-to-r from-blue-500/40 via-indigo-500/40 to-blue-600/40 shadow-2xl relative overflow-hidden">
-          <div className="rounded-[15px] bg-slate-900/95 p-6 sm:p-10 relative overflow-hidden backdrop-blur-xl">
+          <div className="rounded-[15px] bg-slate-900/95 p-6 sm:p-8 relative overflow-hidden backdrop-blur-xl">
             {/* Ambient Backlight Glow */}
             <div className="absolute -top-12 -right-12 w-56 h-56 bg-blue-500/15 rounded-full blur-3xl pointer-events-none" />
             <div className="absolute -bottom-12 -left-12 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
 
-            <div className="max-w-3xl space-y-4 relative z-10">
+            <div className="w-full space-y-3.5 relative z-10">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-md bg-blue-950/80 text-blue-300 text-xs font-mono-tabular font-bold border border-blue-800/80 shadow-xs">
                 <FileCheck2 className="w-3.5 h-3.5 text-blue-400" />
                 <span>PLATFORM OVERVIEW</span>
@@ -640,7 +650,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onHowItW
               </h2>
 
               {/* Poetic & Poignant Text */}
-              <p className="text-sm sm:text-base text-slate-200 leading-relaxed font-normal">
+              <p className="text-sm sm:text-base text-slate-200 leading-relaxed font-normal w-full">
                 In computing, a checksum verifies data integrity — catching the silent bit that shouldn't have flipped. Ours catches the human context that shouldn't have been silenced. Checksum sits between your hiring model and its verdicts — whether scoring via your native agent, a live REST endpoint, or historical decisions — holding every outcome accountable to truth through SHAP feature attribution, counterfactual perturbation, and the EEOC four-fifths line.
               </p>
             </div>
@@ -649,7 +659,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onHowItW
       </section>
 
       {/* Horizontal Feature Carousel Section */}
-      <section className="space-y-6">
+      <section className="space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-md text-xs font-mono-tabular font-bold bg-blue-100 text-blue-900 border border-blue-300 uppercase tracking-wider mb-2">
@@ -667,14 +677,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onHowItW
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => scrollCarousel('left')}
-              className="p-2.5 rounded-lg bg-white text-slate-800 hover:text-slate-950 hover:bg-slate-100 border border-slate-300 shadow-xs transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="p-2.5 rounded-lg bg-white text-slate-800 hover:text-slate-950 hover:bg-slate-100 border border-slate-300 shadow-xs transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
               aria-label="Scroll left"
             >
               <ChevronLeft className="w-5 h-5" />
             </button>
             <button
               onClick={() => scrollCarousel('right')}
-              className="p-2.5 rounded-lg bg-white text-slate-800 hover:text-slate-950 hover:bg-slate-100 border border-slate-300 shadow-xs transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="p-2.5 rounded-lg bg-white text-slate-800 hover:text-slate-950 hover:bg-slate-100 border border-slate-300 shadow-xs transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
               aria-label="Scroll right"
             >
               <ChevronRight className="w-5 h-5" />
@@ -687,7 +697,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onHowItW
           ref={carouselRef}
           onMouseEnter={() => setIsCarouselHovered(true)}
           onMouseLeave={() => setIsCarouselHovered(false)}
-          className="flex gap-6 overflow-x-auto scroll-smooth snap-x snap-proximity pb-8 pt-4 px-1 scrollbar-none border-b border-slate-200"
+          onTouchStart={() => setIsCarouselHovered(true)}
+          onTouchEnd={() => setIsCarouselHovered(false)}
+          className="flex gap-4 sm:gap-6 overflow-x-auto scroll-smooth snap-x snap-mandatory sm:snap-proximity pb-8 pt-3 px-0 scrollbar-none border-b border-slate-200"
           style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
           {features.map((item) => (
@@ -695,12 +707,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onHowItW
               key={item.id}
               whileHover={{ y: -8, rotateX: 3, rotateY: -3, scale: 1.02 }}
               transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-              className="snap-start shrink-0 w-[300px] sm:w-[340px] flex flex-col transform-gpu"
+              className="snap-start shrink-0 w-[84vw] max-w-[320px] sm:w-[340px] flex flex-col transform-gpu"
               style={{ perspective: 1000 }}
             >
               <div className="h-full rounded-2xl p-[1px] bg-gradient-to-b from-slate-200 via-blue-200/60 to-slate-200 hover:from-blue-500 hover:via-indigo-400 hover:to-blue-600 transition-all duration-300 shadow-lg hover:shadow-2xl hover:shadow-blue-500/20 group">
                 <Card variant="default" className="h-full flex flex-col justify-between rounded-[15px] bg-white group-hover:bg-slate-50/90 transition-all duration-300 border-0">
-                  <CardContent className="p-6 space-y-4 flex-1 flex flex-col justify-between">
+                  <CardContent className="p-4 sm:p-6 space-y-3 sm:space-y-4 flex-1 flex flex-col justify-between">
                     <div>
                       {/* Header: Icon & Badge */}
                       <div className="flex items-center justify-between gap-2 mb-3">
@@ -747,15 +759,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onHowItW
       <motion.section
         whileHover={{ y: -4, scale: 1.005 }}
         transition={{ type: 'spring', stiffness: 260, damping: 20 }}
-        className="p-[1px] rounded-3xl bg-gradient-to-r from-blue-500/50 via-indigo-500/40 to-blue-600/50 shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform-gpu"
+        className="p-[1px] rounded-2xl bg-gradient-to-r from-blue-500/50 via-indigo-500/40 to-blue-600/50 shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform-gpu"
         style={{ perspective: 1000 }}
       >
-        <div className="rounded-[23px] bg-slate-900/95 p-6 sm:p-10 backdrop-blur-xl relative overflow-hidden group">
+        <div className="rounded-[15px] bg-slate-900/95 p-6 sm:p-8 backdrop-blur-xl relative overflow-hidden group">
           {/* Ambient Background Glowing Orbs */}
           <div className="absolute -top-16 -right-16 w-64 h-64 bg-blue-600/20 rounded-full blur-3xl pointer-events-none group-hover:bg-blue-500/30 transition-all duration-500" />
           <div className="absolute -bottom-16 -left-16 w-64 h-64 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none group-hover:bg-indigo-500/25 transition-all duration-500" />
 
-          <div className="max-w-4xl space-y-5 relative z-10">
+          <div className="w-full space-y-4 relative z-10">
+            {/* Header Row */}
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-2.5">
                 <div className="p-2.5 rounded-xl bg-blue-600/25 text-blue-400 border border-blue-500/40 shadow-xs group-hover:scale-110 transition-transform duration-300">
@@ -770,31 +783,33 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onHowItW
               </span>
             </div>
 
+            {/* Section Title */}
             <h2 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-slate-100 tracking-tight">
               Why <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-300 to-blue-200">"Checksum"</span>?
             </h2>
 
             {/* Poetic & Compelling Statement */}
-            <p className="text-sm sm:text-base text-slate-200 leading-relaxed font-normal sm:font-medium">
+            <p className="text-sm sm:text-base text-slate-200 leading-relaxed font-normal sm:font-medium w-full">
               A checksum never asks for blind faith; it demands proof of integrity. Checksum expects the same standard from automated hiring decisions — asking not merely <span className="italic text-blue-200 font-semibold">"was this candidate rejected,"</span> but <span className="italic text-emerald-300 font-semibold">"would they have been rejected if evaluated with complete fairness."</span> That is the fundamental boundary between an opaque score and a defensible verdict.
             </p>
 
             {/* Key Assurance Feature Pills */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/90 hover:border-blue-500/40 transition-colors shadow-xs">
+              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/90 hover:border-blue-500/40 transition-colors shadow-xs space-y-1">
                 <span className="text-xs font-bold text-blue-300 block font-mono-tabular">01 • Mathematical Rigor</span>
-                <span className="text-[11px] text-slate-400 mt-0.5 block leading-tight">SHAP attributions calculate exact feature contribution vectors.</span>
+                <span className="text-[11px] text-slate-400 block leading-snug">SHAP attributions calculate exact feature contribution vectors.</span>
               </div>
-              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/90 hover:border-blue-500/40 transition-colors shadow-xs">
+              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/90 hover:border-blue-500/40 transition-colors shadow-xs space-y-1">
                 <span className="text-xs font-bold text-blue-300 block font-mono-tabular">02 • EEOC 80% Benchmark</span>
-                <span className="text-[11px] text-slate-400 mt-0.5 block leading-tight">Automated four-fifths adverse impact ratio verification.</span>
+                <span className="text-[11px] text-slate-400 block leading-snug">Automated four-fifths adverse impact ratio verification.</span>
               </div>
-              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/90 hover:border-blue-500/40 transition-colors shadow-xs">
+              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/90 hover:border-blue-500/40 transition-colors shadow-xs space-y-1">
                 <span className="text-xs font-bold text-blue-300 block font-mono-tabular">03 • Defensible Verdicts</span>
-                <span className="text-[11px] text-slate-400 mt-0.5 block leading-tight">Export legal-ready compliance reports and subgroup audits.</span>
+                <span className="text-[11px] text-slate-400 block leading-snug">Export legal-ready compliance reports and subgroup audits.</span>
               </div>
             </div>
 
+            {/* Action Bar */}
             <div className="pt-4 flex flex-wrap items-center justify-between gap-4 border-t border-slate-800/80">
               <Button
                 variant="primary"
