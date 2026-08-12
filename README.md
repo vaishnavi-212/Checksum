@@ -30,7 +30,7 @@
 
 ## 🚨 Problem Statement
 
-AI now drives hiring decisions at **43% of organizations**, up from 26% a year earlier (SHRM, 2025) — recruiting is the single largest use case. Yet fewer than 1 in 10 of these systems have ever undergone an independent bias audit (McKinsey, 2023).
+AI adoption in HR has reached 43% of organizations, up from 26% a year earlier. (SHRM, 2025) — recruiting is the single largest use case. In a study of 391 employers affected by New York City's algorithmic hiring law, only 18 publicly posted audit reports — roughly 1 in 22 employers — highlighting a major gap between mandated auditing and public accountability.
 
 Existing audit tools force a choice: assume full access to a model's internals to explain anything, or run a purely statistical check that can prove outcomes differ without ever saying *why*. Neither works when the model is a vendor's closed API, or all you have is a spreadsheet of past decisions — and almost none of them are built around the signals that actually shape hiring outcomes in India (college tier, metro access, career gaps) rather than checklists imported from a different labor market. Checksum closes that gap.
 
@@ -38,7 +38,7 @@ Existing audit tools force a choice: assume full access to a model's internals t
 
 Checksum is a **model-agnostic AI hiring-bias audit platform**. It evaluates, stress-tests, and explains algorithmic hiring decisions — whichever kind of access you actually have to the model behind them:
 
-- **Audits** — your own model (full SHAP), a live external API (real-time calls), or decisions-only data (no model needed) — the same rigor, adapted to what's actually available.
+- **Audits** — your own model (full SHAP), a live external API (real-time calls), or decisions-only data (no model needed) — the same audit framework, adapted to what's actually available.
 - **Explains** — SHAP feature attribution + live counterfactual perturbation, not just a statistical pass/fail.
 - **Verifies fairness** — EEOC four-fifths rule, demographic parity, and matched-pair disparity testing.
 - **Fixes** — one-click mitigation that recalibrates a biased outcome, before/after shown side by side.
