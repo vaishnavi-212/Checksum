@@ -12,6 +12,7 @@ export interface AuditStatusResponse {
   path?: string;
   audit_mode?: string;
   fix_status?: string;
+  fix_error?: string | null;
   progress?: string;
   warnings?: string[];
   error?: string;
@@ -32,6 +33,31 @@ export interface PerturbationResultItem {
   per_candidate_deltas?: number[];
   n_scoring_errors?: number;
   note?: string | null;
+  /** 'tested' | 'not_model_input' | 'single_group' | 'error' */
+  status?: string;
+  error?: string;
+  reference_group?: string;
+  from_group?: string;
+  to_group?: string;
+  comparison_label?: string;
+  p_value_adjusted?: number;
+  grouping?: string;
+  comparisons?: PerturbationComparison[];
+}
+
+export interface PerturbationComparison {
+  from_group: string;
+  to_group: string;
+  comparison_label: string;
+  n_in_group: number;
+  too_small: boolean;
+  n_candidates: number;
+  avg_delta_pts: number;
+  median_delta_pts: number;
+  p_value: number;
+  p_value_adjusted: number;
+  statistically_significant: boolean;
+  severity: string;
 }
 
 export interface ShapSummaryItem {
@@ -83,6 +109,11 @@ export interface FourFifthsRuleResult {
   flag?: boolean;
   ratios?: Record<string, number>;
   flagged_groups?: Record<string, number>;
+  below_four_fifths_not_significant?: Record<string, number>;
+  insufficient_sample_groups?: string[];
+  group_p_values?: Record<string, number>;
+  p_value?: number | null;
+  note?: string;
 }
 
 export interface DemographicParityResult {
@@ -91,6 +122,8 @@ export interface DemographicParityResult {
   min_rate?: number;
   threshold?: number;
   flag?: boolean;
+  p_value?: number;
+  note?: string;
 }
 
 export interface MatchedPairResult {
@@ -101,10 +134,23 @@ export interface MatchedPairResult {
   reference_group?: string;
   comparison_group?: string;
   contingency_table?: number[][];
+  common_odds_ratio?: number | null;
+  comparisons?: MatchedPairComparison[];
   assumptions?: string;
   error?: string;
   note?: string;
   [key: string]: any;
+}
+
+export interface MatchedPairComparison {
+  reference_group: string;
+  comparison_group: string;
+  p_value: number;
+  p_value_raw: number;
+  common_odds_ratio: number | null;
+  n_pairs: number;
+  flag: boolean;
+  contingency_table: number[][];
 }
 
 export interface StatisticalResults {
@@ -115,6 +161,12 @@ export interface StatisticalResults {
   four_fifths_rule?: FourFifthsRuleResult;
   demographic_parity?: DemographicParityResult;
   matched_pair?: MatchedPairResult;
+  group_sizes?: Record<string, number>;
+  min_group_size?: number;
+  insufficient_sample_groups?: string[];
+  grouping?: string;
+  additional_group_audits?: Record<string, StatisticalResults>;
+  fields_flagged?: string[];
   error?: string;
   [key: string]: any;
 }
@@ -124,6 +176,12 @@ export interface MitigationMeta {
   n_candidates_used?: number;
   n_scoring_errors?: number;
   groups_dropped?: string[];
+  group_field?: string;
+}
+
+export interface GroupRate {
+  rate: number;
+  n: number;
 }
 
 export interface FixBeforeAfter {
@@ -133,7 +191,15 @@ export interface FixBeforeAfter {
   pedigree_reliance_after_pct?: number | null;
   improved?: boolean;
   mitigation_meta?: MitigationMeta;
+  before_summary?: ShapSummaryItem | null;
   after_summary?: ShapSummaryItem | null;
+  group_field?: string;
+  measurement_method?: string;
+  shortlist_rates_before?: Record<string, GroupRate>;
+  shortlist_rates_after?: Record<string, GroupRate>;
+  four_fifths_ratio_before?: number | null;
+  four_fifths_ratio_after?: number | null;
+  selection_gap_improved?: boolean;
   note?: string;
 }
 
@@ -169,9 +235,9 @@ export interface HealthResponse {
 export async function getHealth(): Promise<HealthResponse> {
   const response = await fetch(`${API_BASE}/health`, {
     method: 'GET',
-    headers: {
+    headers: withAuth({
       'Accept': 'application/json',
-    },
+    }),
   });
 
   return handleResponse<HealthResponse>(response);
@@ -197,7 +263,26 @@ export interface PerturbCandidateResponse {
   delta: number;
 }
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'https://checksum-production.up.railway.app').replace(/\/+$/, '');
+// Set VITE_API_BASE_URL in Vercel (Project → Settings → Environment Variables)
+// to your Render URL. Local dev falls back to a backend on localhost:8000.
+// There is deliberately no production fallback: a stale hard-coded URL is what
+// silently broke every upload when the old backend went away.
+const API_BASE = (
+  import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '')
+).replace(/\/+$/, '');
+
+if (!API_BASE) {
+  console.error('VITE_API_BASE_URL is not set; API calls will fail. Set it in your hosting environment.');
+}
+
+// Optional: only if the backend sets CHECKSUM_API_KEY. Anything in a VITE_
+// variable ends up in the public JS bundle, so this is a speed bump against
+// casual abuse, not real authentication.
+const API_KEY: string | undefined = import.meta.env.VITE_API_KEY || undefined;
+
+function withAuth(headers: Record<string, string> = {}): Record<string, string> {
+  return API_KEY ? { ...headers, 'X-API-Key': API_KEY } : headers;
+}
 
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -247,6 +332,7 @@ export async function uploadCandidatesOnly(file: File): Promise<UploadResponse> 
 
   const response = await fetch(`${API_BASE}/audit/upload`, {
     method: 'POST',
+    headers: withAuth(),
     body: formData,
   });
 
@@ -272,6 +358,7 @@ export async function uploadCandidatesExternal(
 
   const response = await fetch(`${API_BASE}/audit/upload-external`, {
     method: 'POST',
+    headers: withAuth(),
     body: formData,
   });
 
@@ -284,9 +371,9 @@ export async function uploadCandidatesExternal(
 export async function getJobStatus(jobId: string): Promise<AuditStatusResponse> {
   const response = await fetch(`${API_BASE}/audit/${jobId}/status`, {
     method: 'GET',
-    headers: {
+    headers: withAuth({
       'Accept': 'application/json',
-    },
+    }),
   });
 
   return handleResponse<AuditStatusResponse>(response);
@@ -298,9 +385,9 @@ export async function getJobStatus(jobId: string): Promise<AuditStatusResponse> 
 export async function getJobResults(jobId: string): Promise<ResultsResponse> {
   const response = await fetch(`${API_BASE}/audit/${jobId}/results`, {
     method: 'GET',
-    headers: {
+    headers: withAuth({
       'Accept': 'application/json',
-    },
+    }),
   });
 
   return handleResponse<ResultsResponse>(response);
@@ -312,9 +399,9 @@ export async function getJobResults(jobId: string): Promise<ResultsResponse> {
 export async function getJobExplanation(jobId: string): Promise<ExplanationResponse> {
   const response = await fetch(`${API_BASE}/audit/${jobId}/explanation`, {
     method: 'GET',
-    headers: {
+    headers: withAuth({
       'Accept': 'application/json',
-    },
+    }),
   });
 
   return handleResponse<ExplanationResponse>(response);
@@ -330,12 +417,12 @@ export async function perturbCandidate(
   field: string,
   newValue: any
 ): Promise<PerturbCandidateResponse> {
-  const response = await fetch(`${API_BASE}/audit/${jobId}/candidate/${candidateId}/perturb`, {
+  const response = await fetch(`${API_BASE}/audit/${encodeURIComponent(jobId)}/candidate/${encodeURIComponent(candidateId)}/perturb`, {
     method: 'POST',
-    headers: {
+    headers: withAuth({
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-    },
+    }),
     body: JSON.stringify({
       field,
       new_value: newValue,
@@ -355,10 +442,10 @@ export async function triggerFix(
 ): Promise<TriggerFixResponse> {
   const response = await fetch(`${API_BASE}/audit/${jobId}/fix`, {
     method: 'POST',
-    headers: {
+    headers: withAuth({
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-    },
+    }),
     body: JSON.stringify({
       strategy,
     }),

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -81,11 +81,30 @@ export const MitigationPanel: React.FC<MitigationPanelProps> = ({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<any>(null);
   const [pollingStatus, setPollingStatus] = useState<string>(fixStatus);
+  const [fixError, setFixError] = useState<string | null>(null);
+  const refreshRef = useRef(onRefreshResults);
+  refreshRef.current = onRefreshResults;
 
   // Sync internal polling status
   useEffect(() => {
     setPollingStatus(fixStatus);
   }, [fixStatus]);
+
+  // On load, ask the server: a fix may already be running (e.g. after a page
+  // reload), which results.fix_applied alone can't tell us.
+  useEffect(() => {
+    let cancelled = false;
+    getJobStatus(jobId)
+      .then((s) => {
+        if (cancelled) return;
+        if (s.fix_status === 'running' || s.fix_status === 'failed') setPollingStatus(s.fix_status);
+        if (s.fix_error) setFixError(s.fix_error);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
 
   // Polling loop when fix_status is "running"
   useEffect(() => {
@@ -97,10 +116,11 @@ export const MitigationPanel: React.FC<MitigationPanelProps> = ({
           const statusRes = await getJobStatus(jobId);
           const currentFixStatus = statusRes.fix_status || 'idle';
           setPollingStatus(currentFixStatus);
+          setFixError(statusRes.fix_error || null);
 
           if (currentFixStatus === 'done' || currentFixStatus === 'failed') {
             clearInterval(interval);
-            await onRefreshResults();
+            await refreshRef.current();
           }
         } catch (err) {
           console.error('Error polling fix status:', err);
@@ -111,7 +131,7 @@ export const MitigationPanel: React.FC<MitigationPanelProps> = ({
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [pollingStatus, jobId, onRefreshResults]);
+  }, [pollingStatus, jobId]);
 
   const handleTriggerFix = async () => {
     setIsSubmitting(true);
@@ -119,6 +139,7 @@ export const MitigationPanel: React.FC<MitigationPanelProps> = ({
 
     try {
       await triggerFix(jobId, selectedStrategy);
+      setFixError(null);
       setPollingStatus('running');
       setIsModalOpen(false);
     } catch (err: any) {
@@ -140,7 +161,9 @@ export const MitigationPanel: React.FC<MitigationPanelProps> = ({
   const isFixRunning = pollingStatus === 'running';
 
   // Extract metrics from fixData if available
-  const beforePct = fixData?.pedigree_reliance_before_pct ?? results.shap_summary?.pedigree_reliance_pct ?? null;
+  // Both numbers come from the same method (KernelSHAP) on the same sample.
+  // Never fall back to the audit's TreeSHAP figure: different units.
+  const beforePct = fixData?.pedigree_reliance_before_pct ?? null;
   const afterPct = fixData?.pedigree_reliance_after_pct ?? null;
   const isImproved = fixData?.improved ?? (beforePct !== null && afterPct !== null && afterPct < beforePct);
   const deltaPct = beforePct !== null && afterPct !== null ? afterPct - beforePct : null;
@@ -165,6 +188,19 @@ export const MitigationPanel: React.FC<MitigationPanelProps> = ({
       outcomeBadgeText = 'NO SIGNIFICANT CHANGE';
       const deltaSign = deltaPct > 0 ? '+' : '';
       outcomeDescription = `Group-mean score adjustment produced no significant change in pedigree/proxy reliance (${beforePct.toFixed(1)}% vs ${afterPct.toFixed(1)}%, delta: ${deltaSign}${deltaPct.toFixed(1)} pts). Model feature importance remained stable.`;
+    }
+  }
+
+  const ratesBefore = fixData?.shortlist_rates_before || {};
+  const ratesAfter = fixData?.shortlist_rates_after || {};
+  const rateGroups = Object.keys(ratesBefore);
+  if (fixData && fixData.four_fifths_ratio_before !== undefined && fixData.four_fifths_ratio_after !== undefined) {
+    const rb = fixData.four_fifths_ratio_before;
+    const ra = fixData.four_fifths_ratio_after;
+    if (rb !== null && ra !== null) {
+      outcomeDescription += fixData.selection_gap_improved
+        ? ` The lowest group's shortlist rate rose to ${(ra * 100).toFixed(0)}% of the top group's (from ${(rb * 100).toFixed(0)}%).`
+        : ` However, the selection gap did not improve: the lowest group's shortlist rate is still ${(ra * 100).toFixed(0)}% of the top group's.`;
     }
   }
 
@@ -223,6 +259,15 @@ export const MitigationPanel: React.FC<MitigationPanelProps> = ({
         <ErrorState
           error={error}
           title="Failed to Trigger Bias Mitigation"
+          onRetry={() => setIsModalOpen(true)}
+        />
+      )}
+
+      {pollingStatus === 'failed' && (
+        <ErrorState
+          title="Bias Mitigation Failed"
+          detail={fixError || 'The mitigation job failed on the server.'}
+          errorCode="FIX_FAILED"
           onRetry={() => setIsModalOpen(true)}
         />
       )}
@@ -387,6 +432,48 @@ export const MitigationPanel: React.FC<MitigationPanelProps> = ({
               </div>
             </Card>
           </div>
+
+          {/* Shortlist rates by group, before vs after */}
+          {rateGroups.length > 0 && (
+            <Card variant="default" className="p-5 bg-white border-slate-200 shadow-2xs space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Shortlist rate by {fixData.group_field?.replace(/_/g, ' ') || 'group'} (score 50+)
+                </h3>
+                <Badge variant={fixData.selection_gap_improved ? 'success' : 'warning'} size="sm">
+                  {fixData.selection_gap_improved ? 'Gap narrowed' : 'Gap not narrowed'}
+                </Badge>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs font-mono-tabular">
+                  <thead>
+                    <tr className="text-slate-500 text-left">
+                      <th className="py-1.5 pr-3 font-semibold">Group</th>
+                      <th className="py-1.5 pr-3 font-semibold text-right">Candidates</th>
+                      <th className="py-1.5 pr-3 font-semibold text-right">Before</th>
+                      <th className="py-1.5 font-semibold text-right">After</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rateGroups.map((g) => (
+                      <tr key={g} className="border-t border-slate-100">
+                        <td className="py-1.5 pr-3 font-bold text-slate-900">{g}</td>
+                        <td className="py-1.5 pr-3 text-right text-slate-600">{ratesBefore[g]?.n ?? '—'}</td>
+                        <td className="py-1.5 pr-3 text-right">{((ratesBefore[g]?.rate ?? 0) * 100).toFixed(1)}%</td>
+                        <td className="py-1.5 text-right font-bold">
+                          {ratesAfter[g] ? `${(ratesAfter[g].rate * 100).toFixed(1)}%` : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Lowest-to-highest ratio: {fixData.four_fifths_ratio_before ?? '—'} before →{' '}
+                {fixData.four_fifths_ratio_after ?? '—'} after (0.8+ meets the four-fifths rule).
+              </p>
+            </Card>
+          )}
 
           {/* Audit Transparency & Candidate Exclusion Disclosures */}
           {meta && (

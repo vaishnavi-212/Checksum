@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -25,32 +25,43 @@ export interface JobStatusTrackerProps {
   className?: string;
 }
 
+// Stage ids match the node names the backend reports in `progress`
+// (orchestration/graph.py). `progress` is the LAST COMPLETED node, so the
+// stage after it is the one currently running.
 const DEFAULT_STAGES: JobStage[] = [
   {
-    id: 'node_ingest',
+    id: 'ingest',
     label: 'Dataset Ingestion & Translation',
     description: 'Parsing candidate CSV features and mapping column synonyms',
     status: 'pending',
   },
   {
-    id: 'node_score',
-    label: 'Propensity Scoring',
-    description: 'Running candidate vectors through scoring model',
+    id: 'score',
+    label: 'Scoring',
+    description: 'Running candidates through the scoring model (or reading uploaded decisions)',
     status: 'pending',
   },
   {
-    id: 'node_audit_full',
-    label: 'Bias Audit & Perturbation Suite',
-    description: 'Executing SHAP attribution and counterfactual field perturbations',
+    id: 'audit',
+    label: 'Bias Audit',
+    description: 'Counterfactual perturbation tests and SHAP attribution, or selection-rate statistics',
     status: 'pending',
   },
   {
-    id: 'node_explain',
+    id: 'explain',
     label: 'Findings Narrative Synthesis',
     description: 'Generating human-readable executive audit summary',
     status: 'pending',
   },
 ];
+
+const PROGRESS_TO_STAGE: Record<string, string> = {
+  ingest: 'ingest',
+  score: 'score',
+  audit_full: 'audit',
+  audit_stats_only: 'audit',
+  explain: 'explain',
+};
 
 export const JobStatusTracker: React.FC<JobStatusTrackerProps> = ({
   jobId,
@@ -61,8 +72,10 @@ export const JobStatusTracker: React.FC<JobStatusTrackerProps> = ({
   const [statusData, setStatusData] = useState<AuditStatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<any>(null);
+  const stopPolling = useRef(false);
 
   const fetchStatus = async () => {
+    if (stopPolling.current) return;
     try {
       const data = await getJobStatus(jobId);
       setStatusData(data);
@@ -74,6 +87,7 @@ export const JobStatusTracker: React.FC<JobStatusTrackerProps> = ({
       }
     } catch (err: any) {
       setError(err);
+      if (typeof err?.detail === 'string' && err.detail.includes('not found')) stopPolling.current = true;
     } finally {
       setIsLoading(false);
     }
@@ -95,34 +109,20 @@ export const JobStatusTracker: React.FC<JobStatusTrackerProps> = ({
   }, [jobId, statusData?.status]);
 
   // Compute stages progress
-  const stages: JobStage[] = DEFAULT_STAGES.map((s) => {
+  const stageIds = DEFAULT_STAGES.map((x) => x.id);
+  const completedIdx = stageIds.indexOf(PROGRESS_TO_STAGE[statusData?.progress || ''] ?? '');
+  const stages: JobStage[] = DEFAULT_STAGES.map((s, idx) => {
     if (!statusData) return s;
-
-    if (statusData.status === 'done') {
-      return { ...s, status: 'done' };
-    }
-
+    if (statusData.status === 'done') return { ...s, status: 'done' };
+    if (idx <= completedIdx) return { ...s, status: 'done' };
     if (statusData.status === 'failed') {
-      if (statusData.progress === s.id) {
-        return { ...s, status: 'failed' };
-      }
+      // The failing step is the first one that didn't complete.
+      return idx === completedIdx + 1 ? { ...s, status: 'failed' } : s;
     }
-
-    if (statusData.progress === s.id) {
-      return { ...s, status: 'running' };
-    }
-
-    // Determine done steps based on order
-    const stageIds = DEFAULT_STAGES.map((x) => x.id);
-    const currIdx = stageIds.indexOf(statusData.progress || '');
-    const thisIdx = stageIds.indexOf(s.id);
-
-    if (currIdx !== -1 && thisIdx < currIdx) {
-      return { ...s, status: 'done' };
-    }
-
+    if (statusData.status === 'running' && idx === completedIdx + 1) return { ...s, status: 'running' };
     return s;
   });
+  const isStatsOnly = statusData?.audit_mode === 'statistical_only';
 
   const isDone = statusData?.status === 'done';
   const isFailed = statusData?.status === 'failed';
@@ -195,6 +195,19 @@ export const JobStatusTracker: React.FC<JobStatusTrackerProps> = ({
         {/* Stepper showing stage progress */}
         <Stepper stages={stages} title="AUDIT PIPELINE NODE STAGES" />
 
+        {/* Could not reach the backend or the job no longer exists */}
+        {error && !isFailed && (
+          <ErrorState
+            title={error?.detail?.includes?.('not found') ? 'Audit Job Not Found' : 'Could Not Reach the Audit Server'}
+            detail={
+              error?.detail?.includes?.('not found')
+                ? 'This job is no longer on the server (jobs are kept in memory and are lost when the server restarts). Please run the audit again.'
+                : error?.detail || 'The status request failed.'
+            }
+            errorCode={error?.error_code}
+          />
+        )}
+
         {/* Error message if job failed */}
         {isFailed && (
           <ErrorState
@@ -214,7 +227,9 @@ export const JobStatusTracker: React.FC<JobStatusTrackerProps> = ({
                   Audit Execution Completed Successfully
                 </h3>
                 <p className="text-xs text-emerald-800">
-                  SHAP attribution and counterfactual perturbations are ready for review.
+                  {isStatsOnly
+                    ? 'Selection-rate statistics for every factor are ready for review.'
+                    : 'SHAP attribution and counterfactual perturbations are ready for review.'}
                 </p>
               </div>
             </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Header } from './components/layout/Header';
 import { Container } from './components/layout/Container';
 import { ToastProvider } from './components/ui/Toast';
@@ -11,10 +11,46 @@ import { UploadResponse } from './services/api';
 
 type ScreenState = 'landing' | 'upload' | 'status' | 'results' | 'how-it-works';
 
+/** Read ?job=<id>&view=results so a refresh or a shared link reopens the audit. */
+function readUrlState(): { jobId: string | null; screen: ScreenState } {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const jobId = params.get('job');
+    if (jobId && /^[a-zA-Z0-9_-]{1,64}$/.test(jobId)) {
+      return { jobId, screen: params.get('view') === 'results' ? 'results' : 'status' };
+    }
+  } catch {
+    // ignore malformed URLs
+  }
+  return { jobId: null, screen: 'landing' };
+}
+
+function writeUrlState(jobId: string | null, screen: ScreenState) {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('job');
+    url.searchParams.delete('view');
+    if (jobId && (screen === 'status' || screen === 'results')) {
+      url.searchParams.set('job', jobId);
+      if (screen === 'results') url.searchParams.set('view', 'results');
+    }
+    window.history.replaceState(null, '', url.toString());
+  } catch {
+    // history API unavailable (e.g. sandboxed preview) - not critical
+  }
+}
+
 function MainApp() {
-  const [activeScreen, setActiveScreen] = useState<ScreenState>('landing');
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const initial = readUrlState();
+  const [activeScreen, setActiveScreenState] = useState<ScreenState>(initial.screen);
+  const [activeJobId, setActiveJobId] = useState<string | null>(initial.jobId);
   const [, setCreatedJobs] = useState<UploadResponse[]>([]);
+
+  useEffect(() => {
+    writeUrlState(activeJobId, activeScreen);
+  }, [activeJobId, activeScreen]);
+
+  const setActiveScreen = (screen: ScreenState) => setActiveScreenState(screen);
 
   const handleJobCreated = (job: UploadResponse) => {
     setCreatedJobs((prev) => [job, ...prev]);

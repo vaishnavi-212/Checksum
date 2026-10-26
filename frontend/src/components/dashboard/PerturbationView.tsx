@@ -269,9 +269,22 @@ export const PerturbationView: React.FC<PerturbationViewProps> = ({
         {perturbationResults && perturbationResults.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4.5">
             {perturbationResults.map((res) => {
-              const isSig = res.statistically_significant;
+              const notTested = res.status !== undefined && res.status !== 'tested';
+              const isSig = !notTested && res.statistically_significant;
               const deltaVal = res.avg_delta_pts ?? 0;
-              const deltaFormatted = deltaVal > 0 ? `+${deltaVal.toFixed(1)} pts` : `${deltaVal.toFixed(1)} pts`;
+              const deltaFormatted = notTested
+                ? '—'
+                : deltaVal > 0
+                ? `+${deltaVal.toFixed(1)} pts`
+                : `${deltaVal.toFixed(1)} pts`;
+              const notTestedLabel =
+                res.status === 'not_model_input'
+                  ? 'Not a model input'
+                  : res.status === 'single_group'
+                  ? 'Only one group present'
+                  : res.status === 'error'
+                  ? 'Test failed'
+                  : '';
 
               return (
                 <Card
@@ -284,7 +297,7 @@ export const PerturbationView: React.FC<PerturbationViewProps> = ({
                       <span className="text-xs font-mono-tabular font-bold text-slate-900 truncate" title={res.field_tested}>
                         {res.field_tested}
                       </span>
-                      {res.severity && (
+                      {res.severity && !notTested && (
                         <Badge
                           variant={
                             res.severity.toUpperCase() === 'HIGH'
@@ -301,7 +314,13 @@ export const PerturbationView: React.FC<PerturbationViewProps> = ({
                     </div>
 
                     <div className="space-y-1 pt-1">
-                      <span className="text-[11px] font-mono-tabular font-medium text-slate-500 block">Average Delta</span>
+                      <span className="text-[11px] font-mono-tabular font-medium text-slate-500 block">
+                        {notTested
+                          ? notTestedLabel
+                          : res.comparison_label
+                          ? `Avg change, ${res.comparison_label} (n=${res.n_candidates})`
+                          : 'Average Delta'}
+                      </span>
                       <div className="text-2xl sm:text-3xl font-extrabold font-mono-tabular tracking-tight">
                         <span
                           className={
@@ -321,7 +340,16 @@ export const PerturbationView: React.FC<PerturbationViewProps> = ({
                   </div>
 
                   <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
-                    {isSig ? (
+                    {notTested ? (
+                      <span
+                        className="text-[11px] text-slate-500 leading-snug"
+                        title={res.note || res.error || ''}
+                      >
+                        {res.status === 'not_model_input'
+                          ? 'Changing it cannot change the score. Check outcomes by group for indirect (proxy) bias.'
+                          : res.note || res.error}
+                      </span>
+                    ) : isSig ? (
                       <Badge variant="danger" size="md" icon={<AlertTriangle className="w-3.5 h-3.5" />}>
                         Significant
                       </Badge>
@@ -331,7 +359,7 @@ export const PerturbationView: React.FC<PerturbationViewProps> = ({
                       </Badge>
                     )}
 
-                    {res.p_value !== undefined && (
+                    {!notTested && res.p_value !== undefined && res.p_value !== null && (
                       <span className="text-[11px] font-mono-tabular text-slate-500 font-semibold">
                         p = {res.p_value < 0.001 ? '< 0.001' : res.p_value.toFixed(3)}
                       </span>
