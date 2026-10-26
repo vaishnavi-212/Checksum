@@ -5,7 +5,9 @@ Upload validation and SSRF guards for external model endpoints.
 from __future__ import annotations
 
 import ipaddress
+import os
 import socket
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -40,9 +42,23 @@ def safe_stored_filename(original_filename: str | None) -> str:
     extension = Path(original_filename or "").suffix.lower()
     if extension not in ALLOWED_UPLOAD_EXTENSIONS:
         extension = ".bin"
-    import uuid
-
     return f"{uuid.uuid4().hex}{extension}"
+
+
+def _matches_allowlist_entry(parsed, entry: str) -> bool:
+    """Compare scheme, exact host and port, then path prefix on a segment
+    boundary. A plain string prefix match let 'https://api.vendor.com' allow
+    'https://api.vendor.com.attacker.net'."""
+    allowed = urlparse(entry)
+    if not allowed.scheme or not allowed.hostname:
+        return False
+    if parsed.scheme != allowed.scheme or (parsed.hostname or "").lower() != allowed.hostname.lower():
+        return False
+    if (parsed.port or None) != (allowed.port or None):
+        return False
+    prefix = allowed.path.rstrip("/")
+    path = parsed.path or "/"
+    return not prefix or path == prefix or path.startswith(prefix + "/")
 
 
 def validate_external_model_url(endpoint_url: str) -> str:
@@ -66,10 +82,10 @@ def validate_external_model_url(endpoint_url: str) -> str:
 
     host = parsed.hostname.lower()
 
-    allowlist_raw = __import__("os").environ.get("EXTERNAL_MODEL_URL_ALLOWLIST", "")
+    allowlist_raw = os.environ.get("EXTERNAL_MODEL_URL_ALLOWLIST", "")
     if allowlist_raw:
-        allowed_prefixes = [p.strip() for p in allowlist_raw.split(",") if p.strip()]
-        if not any(endpoint_url.strip().startswith(prefix) for prefix in allowed_prefixes):
+        allowed = [p.strip() for p in allowlist_raw.split(",") if p.strip()]
+        if not any(_matches_allowlist_entry(parsed, entry) for entry in allowed):
             raise HTTPException(
                 status_code=400,
                 detail="external_model_endpoint is not in EXTERNAL_MODEL_URL_ALLOWLIST.",
@@ -91,13 +107,11 @@ def validate_external_model_url(endpoint_url: str) -> str:
 
     for _family, _type, _proto, _canonname, sockaddr in resolved:
         ip = ipaddress.ip_address(sockaddr[0])
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_reserved
-            or ip.is_multicast
-        ):
+        if getattr(ip, "ipv4_mapped", None):
+            ip = ip.ipv4_mapped
+        # Only publicly routable addresses. is_global also excludes shared
+        # carrier/cloud ranges (100.64.0.0/10) that is_private misses.
+        if not ip.is_global or ip.is_multicast:
             raise HTTPException(
                 status_code=400,
                 detail="external_model_endpoint cannot target private or reserved IP ranges.",

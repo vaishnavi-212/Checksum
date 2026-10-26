@@ -8,6 +8,7 @@ later without touching graph logic.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Callable
 
 from core.constants import FixStatus, JobStatus
@@ -54,6 +55,15 @@ def run_audit_job(
             {"status": JobStatus.FAILED.value, "error": str(exc)},
         )
         logger.exception("job_exception job_id=%s", job_id)
+    finally:
+        # The upload is fully parsed into records by now; don't leave
+        # candidate data sitting in the temp folder.
+        file_path = initial_state.get("file_path")
+        if file_path:
+            try:
+                Path(file_path).unlink(missing_ok=True)
+            except OSError:
+                logger.warning("could not delete upload %s", file_path)
 
 
 def run_fix_job(

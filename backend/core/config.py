@@ -52,7 +52,15 @@ CHECKSUM_ENABLE_PDF: bool = os.environ.get("CHECKSUM_ENABLE_PDF", "false").lower
 CHECKSUM_REQUIRE_HTTPS_EXTERNAL: bool = os.environ.get(
     "CHECKSUM_REQUIRE_HTTPS_EXTERNAL", "false"
 ).lower() in ("1", "true", "yes")
-CHECKSUM_API_KEY: str | None = os.environ.get("CHECKSUM_API_KEY")
+CHECKSUM_API_KEY: str | None = os.environ.get("CHECKSUM_API_KEY") or None
+
+# Comma-separated list of allowed browser origins, e.g.
+# "https://checksum-one.vercel.app,http://localhost:3000". Defaults to "*".
+CHECKSUM_CORS_ORIGINS: list[str] = [
+    o.strip().rstrip("/")
+    for o in os.environ.get("CHECKSUM_CORS_ORIGINS", "*").split(",")
+    if o.strip()
+] or ["*"]
 
 # Sampling caps for large batches (Section 4.3)
 MAX_PERTURBATION_CANDIDATES: int = int(
@@ -63,7 +71,7 @@ MAX_KERNEL_SHAP_CANDIDATES: int = int(
     os.environ.get("CHECKSUM_MAX_KERNEL_SHAP_CANDIDATES", "50")
 )
 MAX_KERNEL_SHAP_BACKGROUND: int = int(
-    os.environ.get("CHECKSUM_MAX_KERNEL_SHAP_BACKGROUND", "100")
+    os.environ.get("CHECKSUM_MAX_KERNEL_SHAP_BACKGROUND", "50")
 )
 
 # Tier 3 statistical thresholds

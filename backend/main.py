@@ -20,17 +20,22 @@ click continuous flow described in Section 5.3b.
 from __future__ import annotations
 
 import logging
-import shutil
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
-from core.config import CHECKSUM_API_KEY, CHECKSUM_ENABLE_PDF, MAX_UPLOAD_BYTES, UPLOAD_DIR
+from core.config import (
+    CHECKSUM_API_KEY,
+    CHECKSUM_CORS_ORIGINS,
+    CHECKSUM_ENABLE_PDF,
+    MAX_UPLOAD_BYTES,
+    UPLOAD_DIR,
+)
 from core.constants import FixStatus, FixStrategy
 from core.job_store import get_job_store
 from core.security import safe_stored_filename, validate_external_model_url, validate_upload_file
@@ -43,9 +48,33 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Checksum Audit API", version="0.1.0")
 
+@app.middleware("http")
+async def optional_api_key_middleware(request: Request, call_next):
+    """Optional X-API-Key gate when CHECKSUM_API_KEY is set.
+
+    Returns a JSON 401 directly (raising HTTPException inside middleware
+    bypasses FastAPI's handlers and surfaced as a 500), and lets CORS
+    preflight (OPTIONS) requests through, since browsers never attach
+    custom headers to those.
+    """
+    if (
+        CHECKSUM_API_KEY
+        and request.method != "OPTIONS"
+        and request.url.path not in ("/", "/health", "/docs", "/openapi.json", "/redoc")
+        and request.headers.get("X-API-Key") != CHECKSUM_API_KEY
+    ):
+        return JSONResponse(
+            status_code=401,
+            content={"error_code": "UNAUTHORIZED", "detail": "Invalid or missing X-API-Key."},
+        )
+    return await call_next(request)
+
+
+# Added AFTER the API-key middleware so it wraps it: even a 401 carries CORS
+# headers, letting the browser show the real error instead of "Failed to fetch".
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CHECKSUM_CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -75,16 +104,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     )
 
 
-@app.middleware("http")
-async def optional_api_key_middleware(request: Request, call_next):
-    """Optional X-API-Key gate when CHECKSUM_API_KEY is set."""
-    if CHECKSUM_API_KEY and request.url.path not in ("/health", "/docs", "/openapi.json", "/redoc"):
-        api_key = request.headers.get("X-API-Key")
-        if api_key != CHECKSUM_API_KEY:
-            raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key.")
-    return await call_next(request)
-
-
 # ---------------------------------------------------------------------------
 # Request/response models
 # ---------------------------------------------------------------------------
@@ -101,6 +120,7 @@ class StatusResponse(BaseModel):
     path: Optional[str] = None
     audit_mode: Optional[str] = None
     fix_status: Optional[str] = None
+    fix_error: Optional[str] = None
     progress: Optional[str] = None
     warnings: list[str] = []
     error: Optional[str] = None
@@ -108,7 +128,16 @@ class StatusResponse(BaseModel):
 
 class PerturbRequest(BaseModel):
     field: str
-    new_value: object
+    # Plain scalars only: this value is passed straight to the scoring model
+    # (and, on Path 2A, to a third-party API).
+    new_value: Union[bool, int, float, str] = Field(...)
+
+    @field_validator("new_value")
+    @classmethod
+    def validate_new_value(cls, value):
+        if isinstance(value, str) and len(value) > 100:
+            raise ValueError("new_value is too long (max 100 characters).")
+        return value
 
     @field_validator("field")
     @classmethod
@@ -177,16 +206,27 @@ class ErrorResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _save_upload(file: UploadFile) -> str:
+    """Stream the upload to disk in 1 MB chunks, stopping as soon as it
+    passes MAX_UPLOAD_BYTES (previously the whole file was written first)."""
     validate_upload_file(file)
     dest = UPLOAD_DIR / safe_stored_filename(file.filename)
-    with dest.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
-        if f.tell() > MAX_UPLOAD_BYTES:
-            dest.unlink(missing_ok=True)
-            raise HTTPException(
-                status_code=413,
-                detail=f"Upload exceeds maximum size of {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
-            )
+    written = 0
+    try:
+        with dest.open("wb") as f:
+            while chunk := file.file.read(1024 * 1024):
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Upload exceeds maximum size of {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+                    )
+                f.write(chunk)
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
+    if written == 0:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
     return str(dest)
 
 
@@ -213,8 +253,11 @@ def _queue_job(background_tasks: BackgroundTasks, job_id: str, initial_state: di
 # POST /audit/upload  - Path 1
 # ---------------------------------------------------------------------------
 
+# Endpoints that do blocking work (file writes, model calls) are plain `def`
+# so FastAPI runs them in its thread pool instead of stalling the event loop
+# (and every other request) while they run.
 @app.post("/audit/upload", response_model=UploadResponse)
-async def upload_candidates_only(
+def upload_candidates_only(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
 ):
@@ -247,19 +290,24 @@ async def upload_candidates_only(
 # ---------------------------------------------------------------------------
 
 @app.post("/audit/upload-external", response_model=UploadResponse)
-async def upload_candidates_and_external_model(
+def upload_candidates_and_external_model(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     external_model_endpoint: Optional[str] = Form(None),
 ):
     _check_pdf_docx_allowed(file)
-    file_path = _save_upload(file)
-    job_id = uuid.uuid4().hex
-    path = "2a" if external_model_endpoint else "2b"
+    if external_model_endpoint is not None and not external_model_endpoint.strip():
+        external_model_endpoint = None
 
+    # Validate the endpoint BEFORE saving, so a rejected URL doesn't leave an
+    # orphaned upload on disk.
     validated_endpoint = None
     if external_model_endpoint:
         validated_endpoint = validate_external_model_url(external_model_endpoint)
+
+    file_path = _save_upload(file)
+    job_id = uuid.uuid4().hex
+    path = "2a" if validated_endpoint else "2b"
 
     JOB_STORE.set(
         job_id,
@@ -299,6 +347,7 @@ async def get_status(job_id: str):
         path=job.get("path"),
         audit_mode=result.get("audit_mode"),
         fix_status=job.get("fix_status", FixStatus.IDLE.value),
+        fix_error=job.get("fix_error"),
         progress=result.get("last_completed_node"),
         warnings=result.get("warnings", []),
         error=job.get("error"),
@@ -339,7 +388,7 @@ async def get_results(job_id: str):
 # ---------------------------------------------------------------------------
 
 @app.post("/audit/{job_id}/candidate/{candidate_id}/perturb", response_model=PerturbResponse)
-async def perturb_candidate(job_id: str, candidate_id: str, body: PerturbRequest):
+def perturb_candidate(job_id: str, candidate_id: str, body: PerturbRequest):
     job = JOB_STORE.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job_id not found")
@@ -479,8 +528,13 @@ async def apply_fix(job_id: str, body: FixRequest, background_tasks: BackgroundT
     }
 
 
+@app.get("/")
+async def root():
+    return {"service": "checksum-audit-api", "health": "/health", "docs": "/docs"}
+
+
 @app.get("/health")
-async def health():
+def health():
     model_loaded = False
     calibration_loaded = False
     try:

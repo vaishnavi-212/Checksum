@@ -120,11 +120,21 @@ class IngestionResult:
 # ---------------------------------------------------------------------------
 
 def _read_csv(file_path: str) -> tuple[list[str], list[dict]]:
-    with open(file_path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
-    columns = reader.fieldnames or []
-    return columns, rows
+    # utf-8-sig strips the BOM Excel adds; cp1252 covers CSVs saved by Excel
+    # on Windows, which are not UTF-8 and previously failed the whole job.
+    last_error: Exception | None = None
+    for encoding in ("utf-8-sig", "cp1252"):
+        try:
+            with open(file_path, newline="", encoding=encoding) as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+            columns = [c.strip() for c in (reader.fieldnames or [])]
+            if columns != (reader.fieldnames or []):
+                rows = [{k.strip() if isinstance(k, str) else k: v for k, v in r.items()} for r in rows]
+            return columns, rows
+        except UnicodeDecodeError as exc:
+            last_error = exc
+    raise ValueError(f"Could not read CSV (tried UTF-8 and Windows-1252): {last_error}")
 
 
 def _read_json(file_path: str) -> tuple[list[str], list[dict]]:
