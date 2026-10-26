@@ -25,7 +25,7 @@ Node responsibilities map 1:1 onto plan sections:
   audit_full     -> Audit Agent, perturbation + SHAP           (Tiers 1-2, Section 5.5, 5.7)
   audit_stats_only -> Audit Agent, four-fifths/matched-pair     (Tier 3, Section 5.6, 5.7)
   explain   -> Explanation Agent (LLM, non-critical)            (Section 6)
-  fix       -> Fairlearn mitigator + re-audit                    (Section 5.5, Build step 13)
+  fix       -> group-mean score adjustment + like-for-like re-audit (Section 5.5)
 
 Every node is a pure function of (state) -> state_updates, so the graph is
 easy to unit test node-by-node without spinning up FastAPI or a real model.
@@ -499,10 +499,10 @@ def _template_fallback_explanation(state: CheckSumState) -> str:
 
 def node_fix(state: CheckSumState) -> dict:
     """
-    Build step 13: apply a Fairlearn mitigator (or the rule-based fallback
-    from Section 6: "drop top-flagged feature / apply Fairlearn
-    reweighting") and re-run the audit for a before/after comparison
-    (Section 9, Layer 4 output format).
+    Apply group-mean score adjustment (interface/mitigated_model.py) to the
+    field the audit flagged, then report a like-for-like before/after:
+    reliance measured with the same method on both models, plus shortlist
+    rates and four-fifths ratios per group.
     """
     from agents.audit_agent import AuditAgent
 
@@ -543,31 +543,107 @@ def node_fix(state: CheckSumState) -> dict:
             },
         }
 
+    records = state.get("records", [])
+    group_field = "college_tier"
     mitigation_meta: dict = {}
+    before_summary: dict = {}
+    after_summary: dict = {}
+    rates_before: dict = {}
+    rates_after: dict = {}
     try:
         agent = resolve_scoring_model(state)
-        audit_agent = AuditAgent(model=agent)
-        mitigated_agent = audit_agent.apply_mitigation(agent, state.get("records", []))
+        group_field = _choose_mitigation_field(state, agent)
+        mitigated_agent = AuditAgent(model=agent).apply_mitigation(agent, records, group_field=group_field)
         mitigation_meta = getattr(mitigated_agent, "mitigation_meta", {}) or {}
-        after_summary = AuditAgent(model=mitigated_agent).run_shap_summary(state.get("records", []))
+
+        # Before and after MUST be measured the same way. The audit's own
+        # SHAP summary uses TreeExplainer (log-odds) but a mitigated model
+        # can only be explained with KernelSHAP (probability), and those two
+        # percentages are not comparable - which previously made every fix
+        # look like it increased pedigree reliance.
+        before_summary = AuditAgent(model=agent).run_shap_summary(records, force_kernel=True)
+        after_summary = AuditAgent(model=mitigated_agent).run_shap_summary(records, force_kernel=True)
+        before = before_summary.get("pedigree_reliance_pct")
         after = after_summary.get("pedigree_reliance_pct")
+
+        rates_before = _shortlist_rates(agent, records, group_field)
+        rates_after = _shortlist_rates(mitigated_agent, records, group_field)
         fix_applied = True
     except Exception as e:
         after = None
         fix_applied = False
         after_summary = {"error": str(e)}
 
+    def min_ratio(rates: dict):
+        vals = [r["rate"] for r in rates.values() if r["n"] > 0]
+        if len(vals) < 2 or max(vals) <= 0:
+            return None
+        return round(min(vals) / max(vals), 3)
+
+    ratio_before, ratio_after = min_ratio(rates_before), min_ratio(rates_after)
+
     return {
         "fix_applied": fix_applied,
         "fix_before_after": {
             "strategy_requested": strategy_requested,
             "strategy_applied": "group_mean_adjustment" if fix_applied else None,
+            "group_field": group_field,
+            "measurement_method": before_summary.get("method"),
             "pedigree_reliance_before_pct": before,
             "pedigree_reliance_after_pct": after,
             "improved": (after is not None and before is not None and after < before),
+            "shortlist_rates_before": rates_before,
+            "shortlist_rates_after": rates_after,
+            "four_fifths_ratio_before": ratio_before,
+            "four_fifths_ratio_after": ratio_after,
+            "selection_gap_improved": (
+                ratio_before is not None and ratio_after is not None and ratio_after > ratio_before
+            ),
             "mitigation_meta": mitigation_meta,
+            "before_summary": before_summary,
             "after_summary": after_summary,
+            "note": (
+                "Before/after reliance are both measured with KernelSHAP on the same "
+                "sample so they are directly comparable. Shortlist rates use a score "
+                "of 50+ as 'shortlisted'. Group-mean adjustment shifts every score in "
+                "a group by the same amount, so it can leave a group's shortlist rate "
+                "unchanged when its scores are far below the threshold."
+            ),
         },
+    }
+
+
+def _choose_mitigation_field(state: CheckSumState, model) -> str:
+    """Adjust the field the audit actually flagged (largest significant
+    effect among the model's pedigree fields), falling back to college_tier."""
+    pedigree = set(getattr(model, "pedigree_fields", None) or [])
+    candidates = [
+        r for r in (state.get("perturbation_results") or [])
+        if r.get("status") == "tested"
+        and r.get("statistically_significant")
+        and (not pedigree or r.get("field_tested") in pedigree)
+    ]
+    if not candidates:
+        return "college_tier"
+    return max(candidates, key=lambda r: abs(r.get("avg_delta_pts") or 0))["field_tested"]
+
+
+def _shortlist_rates(model, records: list[dict], group_field: str) -> dict:
+    """Share of candidates scoring 50+ in each group, plus group sizes."""
+    from agents.fairness_stats import group_label
+    from interface.model_interface import candidate_from_record
+
+    candidates = [candidate_from_record(r) for r in records]
+    results = model.score_batch(candidates)
+    groups: dict[str, list[bool]] = {}
+    for c, res in zip(candidates, results):
+        label = group_label(group_field, c.features.get(group_field))
+        if label is None or res.score is None:
+            continue
+        groups.setdefault(label, []).append(res.score >= 50.0)
+    return {
+        g: {"rate": round(sum(v) / len(v), 4), "n": len(v)}
+        for g, v in sorted(groups.items())
     }
 
 

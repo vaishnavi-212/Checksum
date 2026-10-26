@@ -126,8 +126,13 @@ class ExplanationAgent:
                 f"college tier, location, or career gaps."
             )
 
+        tested = [r for r in perturbation_results if r.get("status", "tested") == "tested"]
+        not_inputs = [
+            r.get("field_tested") for r in perturbation_results
+            if r.get("status") == "not_model_input"
+        ]
         flagged = [
-            r for r in perturbation_results
+            r for r in tested
             if r.get("statistically_significant") and r.get("severity") in ("MED", "HIGH")
         ]
         if flagged:
@@ -136,14 +141,30 @@ class ExplanationAgent:
                 field = result.get("field_tested", "this factor")
                 avg_delta = result.get("avg_delta_pts", 0.0)
                 direction = "raised" if avg_delta >= 0 else "lowered"
-                lines.append(
-                    f"- Changing {field} {direction} scores by about "
-                    f"{abs(avg_delta):.1f} points on average."
-                )
-        else:
+                if result.get("from_group") is not None:
+                    lines.append(
+                        f"- Moving candidates from {field} '{result['from_group']}' to "
+                        f"'{result.get('to_group')}' (changing nothing else) {direction} "
+                        f"their scores by about {abs(avg_delta):.1f} points on average "
+                        f"({result.get('n_candidates', 0)} candidates)."
+                    )
+                else:
+                    lines.append(
+                        f"- Changing {field} {direction} scores by about "
+                        f"{abs(avg_delta):.1f} points on average."
+                    )
+        elif tested:
             lines.append(
                 "None of the background factors tested showed a "
                 "meaningful effect on candidate scores."
+            )
+
+        if not_inputs:
+            lines.append(
+                f"Not tested directly: {', '.join(not_inputs)} - the model doesn't "
+                f"use these as inputs, so changing them can't change a score. The "
+                f"model could still disadvantage these groups through related "
+                f"factors; check actual outcomes by group to rule that out."
             )
 
         errors = [r for r in perturbation_results if r.get("error")]
@@ -175,7 +196,16 @@ class ExplanationAgent:
             lines.append("")
 
         four_fifths = statistical_results.get("four_fifths_rule") or {}
-        if four_fifths.get("flag"):
+        small = statistical_results.get("insufficient_sample_groups") or []
+        if small:
+            lines.append(
+                f"Group(s) {', '.join(str(g) for g in small)} had fewer than "
+                f"{statistical_results.get('min_group_size')} candidates, so they "
+                f"are shown but not used to raise a flag."
+            )
+        if four_fifths.get("note") and not four_fifths.get("flag"):
+            lines.append(four_fifths["note"])
+        elif four_fifths.get("flag"):
             flagged = four_fifths.get("flagged_groups") or {}
             group_list = ", ".join(str(g) for g in flagged.keys())
             lines.append(
@@ -204,11 +234,20 @@ class ExplanationAgent:
                 "qualified candidates across groups also found a "
                 "meaningful difference in outcomes."
             )
-        elif matched.get("method"):
+        elif matched.get("n_pairs"):
             lines.append(
                 "A closer, like-for-like comparison of similarly "
                 "qualified candidates across groups did not find a "
                 "meaningful difference in outcomes."
+            )
+
+        primary = statistical_results.get("group_field")
+        others = [f for f in (statistical_results.get("fields_flagged") or []) if f != primary]
+        if others:
+            lines.append("")
+            lines.append(
+                f"Other factors with a flagged difference in selection rates: "
+                f"{', '.join(others)}. See the per-factor breakdown."
             )
 
         return "\n".join(lines)

@@ -13,7 +13,7 @@ from main import JOB_STORE, app
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SAMPLE_CSV = FIXTURES / "sample_candidates.csv"
-DECISIONS_CSV = FIXTURES / "sample_decisions_only.csv"
+DECISIONS_CSV = FIXTURES / "sample_decisions_tier3_bias.csv"  # 400 rows: big enough for group-size + significance checks
 
 
 @pytest.fixture(autouse=True)
@@ -89,7 +89,7 @@ def test_path2b_decisions_only(client):
     with DECISIONS_CSV.open("rb") as handle:
         response = client.post(
             "/audit/upload-external",
-            files={"file": ("sample_decisions_only.csv", handle, "text/csv")},
+            files={"file": ("sample_decisions_tier3_bias.csv", handle, "text/csv")},
         )
 
     assert response.status_code == 200

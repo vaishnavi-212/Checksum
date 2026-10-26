@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from agents.fairness_stats import group_label
 from interface.model_interface import (
     Candidate,
     ScoreResult,
@@ -29,13 +30,13 @@ class GroupAdjustedModel(ScoringModel):
         self._group_adjustments = group_adjustments
         self._group_field = group_field
 
-    def score(self, candidate: Candidate) -> ScoreResult:
-        base = self._inner.score(candidate)
-        tier = str(candidate.features.get(self._group_field, ""))
-        adjustment = self._group_adjustments.get(tier, 0.0)
+    def _adjust(self, candidate: Candidate, base: ScoreResult) -> ScoreResult:
+        if base.score is None:
+            return base  # unscorable stays unscorable; never invent a score
+        group = group_label(self._group_field, candidate.features.get(self._group_field)) or ""
+        adjustment = self._group_adjustments.get(group, 0.0)
         adjusted_score = round(max(0.0, min(100.0, base.score + adjustment)), 2)
-        probability = adjusted_score / 100.0
-        decision = "Shortlisted" if probability >= 0.5 else "Not Shortlisted"
+        decision = "Shortlisted" if adjusted_score >= 50.0 else "Not Shortlisted"
         return replace(
             base,
             score=adjusted_score,
@@ -47,8 +48,14 @@ class GroupAdjustedModel(ScoringModel):
             },
         )
 
+    def score(self, candidate: Candidate) -> ScoreResult:
+        return self._adjust(candidate, self._inner.score(candidate))
+
     def score_batch(self, candidates: list[Candidate]) -> list[ScoreResult]:
-        return [self.score(candidate) for candidate in candidates]
+        # One vectorized call to the inner model (fast for XGBoost), instead
+        # of one model call per candidate.
+        bases = self._inner.score_batch(candidates)
+        return [self._adjust(c, b) for c, b in zip(candidates, bases)]
 
     @property
     def supports_native_explainability(self) -> bool:
@@ -126,7 +133,7 @@ def compute_group_mean_adjustments(
     n_total = 0
     for record in records:
         candidate = candidate_from_record(record)
-        tier = str(candidate.features.get(group_field, ""))
+        tier = group_label(group_field, candidate.features.get(group_field))
         if not tier:
             continue
         candidates_by_tier.setdefault(tier, []).append(candidate)
